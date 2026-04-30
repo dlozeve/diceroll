@@ -14,6 +14,34 @@ static TERM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?<sign>[+-]?)(?:(?<count>\d*)[dD](?<sides>\d+)|(?<num>\d+))").unwrap()
 });
 
+/// Parses a dice expression into a list of `(sign, Term)` pairs.
+///
+/// Signs are `1` or `-1`. Whitespace is ignored. The leading sign of the
+/// first term is always explicit in the result (`+` → `1`, `-` → `-1`,
+/// absent → `1`).
+///
+/// # Errors
+///
+/// Returns an error string if the expression is empty, contains unknown
+/// characters, or violates constraints (zero dice, fewer than 2 sides, etc.).
+///
+/// # Examples
+///
+/// ```
+/// use diceroll::parser::{parse, Term};
+///
+/// let terms = parse("2d6+3").unwrap();
+/// assert_eq!(terms, vec![
+///     (1,  Term::Dice { count: 2, sides: 6 }),
+///     (1,  Term::Const(3)),
+/// ]);
+///
+/// let terms = parse("4d6 - 1").unwrap();
+/// assert_eq!(terms[1], (-1, Term::Const(1)));
+///
+/// assert!(parse("").is_err());
+/// assert!(parse("0d6").is_err());
+/// ```
 pub fn parse(input: &str) -> Result<Vec<(i64, Term)>, String> {
     let s: String = input.chars().filter(|c| !c.is_whitespace()).collect();
     if s.is_empty() {

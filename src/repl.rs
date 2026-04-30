@@ -4,7 +4,7 @@ use rand::Rng;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
-use crate::eval::run;
+use diceroll::run;
 
 fn handle_line(
     line: &str,

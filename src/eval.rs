@@ -27,6 +27,23 @@ pub enum EvalTermKind {
     Const(u64),
 }
 
+/// Parses and evaluates a dice expression, returning a full breakdown.
+///
+/// # Errors
+///
+/// Propagates any parse error from [`crate::parser::parse`].
+///
+/// # Examples
+///
+/// ```
+/// use rand::SeedableRng;
+/// use rand::rngs::StdRng;
+///
+/// let mut rng = StdRng::seed_from_u64(0);
+/// let result = diceroll::run("2d6+3", &mut rng).unwrap();
+/// assert!(result.total >= 5 && result.total <= 15);
+/// assert_eq!(result.terms.len(), 2);
+/// ```
 pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, String> {
     let terms = parse(expr)?;
     Ok(evaluate(&terms, rng))
@@ -62,6 +79,18 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
 }
 
 impl EvalResult {
+    /// Returns a human-readable breakdown: each term with its rolls, then the total.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rand::SeedableRng;
+    /// use rand::rngs::StdRng;
+    ///
+    /// let mut rng = StdRng::seed_from_u64(0);
+    /// let result = diceroll::run("3+4-1", &mut rng).unwrap();
+    /// assert_eq!(result.display(), "3 + 4 - 1");
+    /// ```
     pub fn display(&self) -> String {
         let mut out = String::new();
         for (idx, term) in self.terms.iter().enumerate() {
@@ -129,6 +158,20 @@ impl EvalResult {
         out
     }
 
+    /// Returns the plain display string (`"<breakdown> = <total>"`) or JSON.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rand::SeedableRng;
+    /// use rand::rngs::StdRng;
+    ///
+    /// let mut rng = StdRng::seed_from_u64(0);
+    /// let result = diceroll::run("3+4-1", &mut rng).unwrap();
+    /// assert_eq!(result.formatted(false), "3 + 4 - 1 = 6");
+    /// let json = result.formatted(true);
+    /// assert!(json.starts_with(r#"{"total":6"#));
+    /// ```
     pub fn formatted(&self, json: bool) -> String {
         if json {
             self.json()

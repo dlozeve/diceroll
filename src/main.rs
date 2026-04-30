@@ -7,11 +7,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-mod eval;
-mod parser;
 mod repl;
 
-use eval::run;
+use diceroll::run;
 use repl::{read_stdin, repl};
 
 #[derive(Debug, PartialEq, Eq)]
