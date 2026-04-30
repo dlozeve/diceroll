@@ -1,3 +1,5 @@
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::env;
 use std::ffi::OsString;
 use std::process;
@@ -29,7 +31,11 @@ fn main() {
     };
 
     if let Some(n) = args.seed {
-        dispatch(args.expr.as_deref(), args.json, &mut StdRng::seed_from_u64(n));
+        dispatch(
+            args.expr.as_deref(),
+            args.json,
+            &mut StdRng::seed_from_u64(n),
+        );
     } else {
         dispatch(args.expr.as_deref(), args.json, &mut rand::rng());
     }
@@ -122,14 +128,25 @@ mod tests {
 
     #[test]
     fn empty_argv() {
-        assert_eq!(parse(&[]), Args { seed: None, json: false, expr: None });
+        assert_eq!(
+            parse(&[]),
+            Args {
+                seed: None,
+                json: false,
+                expr: None
+            }
+        );
     }
 
     #[test]
     fn seed_separated() {
         assert_eq!(
             parse(&["--seed", "42", "2d6"]),
-            Args { seed: Some(42), json: false, expr: Some("2d6".into()) },
+            Args {
+                seed: Some(42),
+                json: false,
+                expr: Some("2d6".into())
+            },
         );
     }
 
@@ -137,7 +154,11 @@ mod tests {
     fn seed_equals() {
         assert_eq!(
             parse(&["--seed=42", "2d6"]),
-            Args { seed: Some(42), json: false, expr: Some("2d6".into()) },
+            Args {
+                seed: Some(42),
+                json: false,
+                expr: Some("2d6".into())
+            },
         );
     }
 
@@ -145,7 +166,11 @@ mod tests {
     fn seed_after_expr() {
         assert_eq!(
             parse(&["2d6", "--seed", "7"]),
-            Args { seed: Some(7), json: false, expr: Some("2d6".into()) },
+            Args {
+                seed: Some(7),
+                json: false,
+                expr: Some("2d6".into())
+            },
         );
     }
 
@@ -163,7 +188,11 @@ mod tests {
     fn json_flag() {
         assert_eq!(
             parse(&["--json", "2d6"]),
-            Args { seed: None, json: true, expr: Some("2d6".into()) },
+            Args {
+                seed: None,
+                json: true,
+                expr: Some("2d6".into())
+            },
         );
     }
 
@@ -171,7 +200,11 @@ mod tests {
     fn json_after_expr() {
         assert_eq!(
             parse(&["2d6", "--json"]),
-            Args { seed: None, json: true, expr: Some("2d6".into()) },
+            Args {
+                seed: None,
+                json: true,
+                expr: Some("2d6".into())
+            },
         );
     }
 

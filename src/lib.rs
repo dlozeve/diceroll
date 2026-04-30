@@ -16,4 +16,4 @@ pub mod eval;
 pub mod parser;
 
 pub use eval::{EvalResult, EvalTerm, EvalTermKind, evaluate, run};
-pub use parser::{Term, parse};
+pub use parser::{ParseError, Term, parse};

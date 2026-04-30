@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use rand::Rng;
 
-use crate::parser::{Term, parse};
+use crate::parser::{ParseError, Term, parse};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EvalResult {
@@ -44,7 +44,7 @@ pub enum EvalTermKind {
 /// assert!(result.total >= 5 && result.total <= 15);
 /// assert_eq!(result.terms.len(), 2);
 /// ```
-pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, String> {
+pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, ParseError> {
     let terms = parse(expr)?;
     Ok(evaluate(&terms, rng))
 }
@@ -65,17 +65,28 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                     rolls.push(r);
                 }
                 (
-                    EvalTermKind::Dice { count, sides, rolls },
+                    EvalTermKind::Dice {
+                        count,
+                        sides,
+                        rolls,
+                    },
                     sign * sum as i64,
                 )
             }
             Term::Const(n) => (EvalTermKind::Const(n), sign * n as i64),
         };
         total += subtotal;
-        out_terms.push(EvalTerm { sign, kind, subtotal });
+        out_terms.push(EvalTerm {
+            sign,
+            kind,
+            subtotal,
+        });
     }
 
-    EvalResult { total, terms: out_terms }
+    EvalResult {
+        total,
+        terms: out_terms,
+    }
 }
 
 impl EvalResult {
@@ -103,18 +114,22 @@ impl EvalResult {
             };
             out.push_str(op);
             match &term.kind {
-                EvalTermKind::Dice { count, sides, rolls } => {
-                    write!(out, "{count}d{sides}[").unwrap();
+                EvalTermKind::Dice {
+                    count,
+                    sides,
+                    rolls,
+                } => {
+                    let _ = write!(out, "{count}d{sides}[");
                     for (i, r) in rolls.iter().enumerate() {
                         if i > 0 {
                             out.push(',');
                         }
-                        write!(out, "{r}").unwrap();
+                        let _ = write!(out, "{r}");
                     }
                     out.push(']');
                 }
                 EvalTermKind::Const(n) => {
-                    write!(out, "{n}").unwrap();
+                    let _ = write!(out, "{n}");
                 }
             }
         }
@@ -123,34 +138,36 @@ impl EvalResult {
 
     pub fn json(&self) -> String {
         let mut out = String::new();
-        write!(out, "{{\"total\":{},\"terms\":[", self.total).unwrap();
+        let _ = write!(out, "{{\"total\":{},\"terms\":[", self.total);
         for (i, term) in self.terms.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
             match &term.kind {
-                EvalTermKind::Dice { count, sides, rolls } => {
-                    write!(
+                EvalTermKind::Dice {
+                    count,
+                    sides,
+                    rolls,
+                } => {
+                    let _ = write!(
                         out,
                         "{{\"kind\":\"dice\",\"sign\":{},\"count\":{count},\"sides\":{sides},\"rolls\":[",
                         term.sign
-                    )
-                    .unwrap();
+                    );
                     for (j, r) in rolls.iter().enumerate() {
                         if j > 0 {
                             out.push(',');
                         }
-                        write!(out, "{r}").unwrap();
+                        let _ = write!(out, "{r}");
                     }
-                    write!(out, "],\"subtotal\":{}}}", term.subtotal).unwrap();
+                    let _ = write!(out, "],\"subtotal\":{}}}", term.subtotal);
                 }
                 EvalTermKind::Const(n) => {
-                    write!(
+                    let _ = write!(
                         out,
                         "{{\"kind\":\"const\",\"sign\":{},\"value\":{n},\"subtotal\":{}}}",
                         term.sign, term.subtotal,
-                    )
-                    .unwrap();
+                    );
                 }
             }
         }
@@ -182,6 +199,7 @@ impl EvalResult {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rand::SeedableRng;
@@ -206,7 +224,10 @@ mod tests {
     fn evaluate_is_deterministic_for_seed() {
         let mut a = StdRng::seed_from_u64(123);
         let mut b = StdRng::seed_from_u64(123);
-        assert_eq!(run("2d20+3d6+4", &mut a).unwrap(), run("2d20+3d6+4", &mut b).unwrap());
+        assert_eq!(
+            run("2d20+3d6+4", &mut a).unwrap(),
+            run("2d20+3d6+4", &mut b).unwrap()
+        );
     }
 
     #[test]

@@ -1,6 +1,40 @@
-use std::sync::LazyLock;
+use nom::{
+    IResult, Parser,
+    branch::alt,
+    character::complete::{digit0, digit1, multispace0, one_of},
+    combinator::opt,
+    multi::many0,
+};
 
-use regex::Regex;
+/// Typed parse errors returned by [`parse`].
+///
+/// # Examples
+///
+/// ```
+/// use diceroll::parser::{parse, ParseError};
+///
+/// let err = parse("0d6").unwrap_err();
+/// assert!(matches!(err, ParseError::ZeroDice));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseError {
+    #[error("empty expression")]
+    Empty,
+    #[error("unexpected input: '{token}'")]
+    Unexpected { token: String },
+    #[error("unexpected trailing input: '{rest}'")]
+    UnexpectedTrailing { rest: String },
+    #[error("missing '+' or '-' between terms")]
+    MissingOperator,
+    #[error("must roll at least 1 die")]
+    ZeroDice,
+    #[error("dice must have at least 2 sides")]
+    TooFewSides,
+    #[error("dice count exceeds maximum of {max}")]
+    DiceCountExceeded { count: u64, max: u64 },
+    #[error("invalid number: '{0}'")]
+    InvalidNumber(String),
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Term {
@@ -10,9 +44,97 @@ pub enum Term {
 
 const MAX_DICE_COUNT: u64 = 1_000_000;
 
-static TERM_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?<sign>[+-]?)(?:(?<count>\d*)[dD](?<sides>\d+)|(?<num>\d+))").unwrap()
-});
+enum RawAtom<'a> {
+    Dice {
+        count_str: &'a str,
+        sides_str: &'a str,
+    },
+    Const(&'a str),
+}
+
+fn sign_to_i64(c: char) -> i64 {
+    if c == '-' { -1 } else { 1 }
+}
+
+fn parse_sign(input: &str) -> IResult<&str, char> {
+    one_of("+-").parse(input)
+}
+
+fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
+    let (input, count_str) = digit0(input)?;
+    let (input, _) = one_of("dD").parse(input)?;
+    let (input, sides_str) = digit1(input)?;
+    Ok((
+        input,
+        RawAtom::Dice {
+            count_str,
+            sides_str,
+        },
+    ))
+}
+
+fn parse_constant(input: &str) -> IResult<&str, RawAtom<'_>> {
+    let (input, num_str) = digit1(input)?;
+    Ok((input, RawAtom::Const(num_str)))
+}
+
+fn parse_atom(input: &str) -> IResult<&str, RawAtom<'_>> {
+    alt((parse_dice, parse_constant)).parse(input)
+}
+
+fn parse_first_term(input: &str) -> IResult<&str, (Option<char>, RawAtom<'_>)> {
+    let (input, sign) = opt(parse_sign).parse(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, atom) = parse_atom(input)?;
+    Ok((input, (sign, atom)))
+}
+
+fn parse_subsequent_term(input: &str) -> IResult<&str, (char, RawAtom<'_>)> {
+    let (input, _) = multispace0(input)?;
+    let (input, sign) = parse_sign(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, atom) = parse_atom(input)?;
+    Ok((input, (sign, atom)))
+}
+
+fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError> {
+    match raw {
+        RawAtom::Dice {
+            count_str,
+            sides_str,
+        } => {
+            let count: u64 = if count_str.is_empty() {
+                1
+            } else {
+                count_str
+                    .parse()
+                    .map_err(|_| ParseError::InvalidNumber(count_str.to_owned()))?
+            };
+            let sides: u64 = sides_str
+                .parse()
+                .map_err(|_| ParseError::InvalidNumber(sides_str.to_owned()))?;
+            if count == 0 {
+                return Err(ParseError::ZeroDice);
+            }
+            if count > MAX_DICE_COUNT {
+                return Err(ParseError::DiceCountExceeded {
+                    count,
+                    max: MAX_DICE_COUNT,
+                });
+            }
+            if sides < 2 {
+                return Err(ParseError::TooFewSides);
+            }
+            Ok((sign, Term::Dice { count, sides }))
+        }
+        RawAtom::Const(num_str) => {
+            let n: u64 = num_str
+                .parse()
+                .map_err(|_| ParseError::InvalidNumber(num_str.to_owned()))?;
+            Ok((sign, Term::Const(n)))
+        }
+    }
+}
 
 /// Parses a dice expression into a list of `(sign, Term)` pairs.
 ///
@@ -22,7 +144,7 @@ static TERM_RE: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// # Errors
 ///
-/// Returns an error string if the expression is empty, contains unknown
+/// Returns a [`ParseError`] if the expression is empty, contains unknown
 /// characters, or violates constraints (zero dice, fewer than 2 sides, etc.).
 ///
 /// # Examples
@@ -42,69 +164,42 @@ static TERM_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// assert!(parse("").is_err());
 /// assert!(parse("0d6").is_err());
 /// ```
-pub fn parse(input: &str) -> Result<Vec<(i64, Term)>, String> {
-    let s: String = input.chars().filter(|c| !c.is_whitespace()).collect();
-    if s.is_empty() {
-        return Err("empty expression".into());
+pub fn parse(input: &str) -> Result<Vec<(i64, Term)>, ParseError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(ParseError::Empty);
     }
 
-    let mut terms = Vec::new();
-    let mut pos = 0;
+    let (remaining, (sign_ch, first_raw)) =
+        parse_first_term(trimmed).map_err(|_| ParseError::Unexpected {
+            token: trimmed.to_owned(),
+        })?;
 
-    for caps in TERM_RE.captures_iter(&s) {
-        let m = caps.get(0).unwrap();
-        if m.start() != pos {
-            return Err(format!("unexpected input: '{}'", &s[pos..m.start()]));
+    let (remaining, rest_raw) = many0(parse_subsequent_term)
+        .parse(remaining)
+        .unwrap_or_else(|_| unreachable!("many0 never fails"));
+
+    let trailing = remaining.trim();
+    if !trailing.is_empty() {
+        if trailing.starts_with(|c: char| c.is_ascii_digit() || c == 'd' || c == 'D') {
+            return Err(ParseError::MissingOperator);
         }
-        let sign_str = caps.name("sign").unwrap().as_str();
-        if pos > 0 && sign_str.is_empty() {
-            return Err("missing '+' or '-' between terms".into());
-        }
-        let sign: i64 = if sign_str == "-" { -1 } else { 1 };
-
-        let term = if let Some(sides_m) = caps.name("sides") {
-            let count_str = caps.name("count").unwrap().as_str();
-            let count: u64 = if count_str.is_empty() {
-                1
-            } else {
-                count_str
-                    .parse()
-                    .map_err(|_| format!("invalid dice count: '{count_str}'"))?
-            };
-            let sides: u64 = sides_m
-                .as_str()
-                .parse()
-                .map_err(|_| format!("invalid dice sides: '{}'", sides_m.as_str()))?;
-            if count == 0 {
-                return Err("must roll at least 1 die".into());
-            }
-            if count > MAX_DICE_COUNT {
-                return Err(format!("dice count exceeds maximum of {MAX_DICE_COUNT}"));
-            }
-            if sides < 2 {
-                return Err("dice must have at least 2 sides".into());
-            }
-            Term::Dice { count, sides }
-        } else {
-            let num_str = caps.name("num").unwrap().as_str();
-            Term::Const(num_str.parse().map_err(|_| format!("invalid number: '{num_str}'"))?)
-        };
-
-        terms.push((sign, term));
-        pos = m.end();
+        return Err(ParseError::UnexpectedTrailing {
+            rest: trailing.to_owned(),
+        });
     }
 
-    if pos != s.len() {
-        return Err(format!("unexpected trailing input: '{}'", &s[pos..]));
-    }
-    if terms.is_empty() {
-        return Err("no terms found".into());
+    let mut terms = Vec::with_capacity(1 + rest_raw.len());
+    terms.push(validate_atom(sign_ch.map_or(1, sign_to_i64), first_raw)?);
+    for (sign_ch, raw) in rest_raw {
+        terms.push(validate_atom(sign_to_i64(sign_ch), raw)?);
     }
 
     Ok(terms)
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -199,8 +294,6 @@ mod tests {
 
     #[test]
     fn parse_rejects_missing_operator() {
-        // "2d6 3d6" → after stripping whitespace becomes "2d63d6";
-        // first match consumes "2d63", second has empty sign
         assert!(parse("2d6 3d6").is_err());
     }
 
@@ -213,5 +306,100 @@ mod tests {
     fn parse_rejects_excessive_dice_count() {
         assert!(parse(&format!("{}d6", MAX_DICE_COUNT + 1)).is_err());
         assert!(parse(&format!("{}d6", MAX_DICE_COUNT)).is_ok());
+    }
+
+    // Typed variant tests — pin the exact error for each failure mode.
+
+    #[test]
+    fn error_empty() {
+        assert_eq!(parse(""), Err(ParseError::Empty));
+        assert_eq!(parse("   "), Err(ParseError::Empty));
+    }
+
+    #[test]
+    fn error_unexpected() {
+        assert!(matches!(parse("foo"), Err(ParseError::Unexpected { .. })));
+    }
+
+    #[test]
+    fn error_unexpected_trailing() {
+        assert!(matches!(
+            parse("2d6+foo"),
+            Err(ParseError::UnexpectedTrailing { .. })
+        ));
+    }
+
+    #[test]
+    fn error_missing_operator() {
+        assert_eq!(parse("2d6 3d6"), Err(ParseError::MissingOperator));
+    }
+
+    #[test]
+    fn error_zero_dice() {
+        assert_eq!(parse("0d6"), Err(ParseError::ZeroDice));
+    }
+
+    #[test]
+    fn error_too_few_sides() {
+        assert_eq!(parse("2d1"), Err(ParseError::TooFewSides));
+        assert_eq!(parse("2d0"), Err(ParseError::TooFewSides));
+    }
+
+    #[test]
+    fn error_dice_count_exceeded() {
+        let expr = format!("{}d6", MAX_DICE_COUNT + 1);
+        assert!(matches!(
+            parse(&expr),
+            Err(ParseError::DiceCountExceeded {
+                count: _,
+                max: MAX_DICE_COUNT
+            })
+        ));
+    }
+
+    #[test]
+    fn error_invalid_number() {
+        let big = "9".repeat(30);
+        assert!(matches!(
+            parse(&format!("{big}d6")),
+            Err(ParseError::InvalidNumber(_))
+        ));
+    }
+
+    #[test]
+    fn display_messages_match_original() {
+        assert_eq!(ParseError::Empty.to_string(), "empty expression");
+        assert_eq!(
+            ParseError::Unexpected {
+                token: "foo".into()
+            }
+            .to_string(),
+            "unexpected input: 'foo'"
+        );
+        assert_eq!(
+            ParseError::UnexpectedTrailing { rest: "bar".into() }.to_string(),
+            "unexpected trailing input: 'bar'"
+        );
+        assert_eq!(
+            ParseError::MissingOperator.to_string(),
+            "missing '+' or '-' between terms"
+        );
+        assert_eq!(ParseError::ZeroDice.to_string(), "must roll at least 1 die");
+        assert_eq!(
+            ParseError::TooFewSides.to_string(),
+            "dice must have at least 2 sides"
+        );
+        assert_eq!(
+            ParseError::DiceCountExceeded {
+                count: 2,
+                max: 1_000_000
+            }
+            .to_string(),
+            "dice count exceeds maximum of 1000000"
+        );
+        assert_eq!(
+            ParseError::InvalidNumber("xyz".into()).to_string(),
+            "invalid number: 'xyz'"
+        );
     }
 }

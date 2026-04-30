@@ -6,5 +6,28 @@ edition = "2024"
 [dependencies]
 lexopt = "0.3"
 rand = "0.9"
-regex = "1"
+nom = "8"
+thiserror = "2"
 rustyline = "14"
+
+[lints.clippy]
+# Safety - treat as errors
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+# Code quality - warnings
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+missing_panics_doc = "warn"
+
+# pedantic = { level = "warn", priority = -1 }
+# missing_errors_doc = "allow"
+
+# Cargo
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
+cargo_common_metadata = "allow"

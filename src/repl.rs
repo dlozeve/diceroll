@@ -69,7 +69,10 @@ mod tests {
         let r = run("2d6+1", &mut expected_rng).unwrap();
 
         assert!(added);
-        assert_eq!(String::from_utf8(out).unwrap(), format!("{}\n", r.formatted(false)));
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("{}\n", r.formatted(false))
+        );
         assert!(err.is_empty());
     }
 
@@ -83,7 +86,10 @@ mod tests {
         let mut expected_rng = StdRng::seed_from_u64(7);
         let r = run("2d6+1", &mut expected_rng).unwrap();
 
-        assert_eq!(String::from_utf8(out).unwrap(), format!("{}\n", r.formatted(true)));
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("{}\n", r.formatted(true))
+        );
         assert!(err.is_empty());
     }
 
