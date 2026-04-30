@@ -12,7 +12,7 @@ mod parser;
 mod repl;
 
 use eval::run;
-use repl::repl;
+use repl::{read_stdin, repl};
 
 #[derive(Debug, PartialEq, Eq)]
 struct Args {
@@ -38,9 +38,15 @@ fn main() {
 }
 
 fn dispatch<R: Rng>(expr: Option<&str>, json: bool, rng: &mut R) {
+    use std::io::IsTerminal;
     let Some(expr) = expr else {
-        if let Err(e) = repl(rng, json) {
-            eprintln!("repl error: {e}");
+        if std::io::stdin().is_terminal() {
+            if let Err(e) = repl(rng, json) {
+                eprintln!("repl error: {e}");
+                process::exit(1);
+            }
+        } else if let Err(e) = read_stdin(rng, json) {
+            eprintln!("stdin error: {e}");
             process::exit(1);
         }
         return;
@@ -93,7 +99,7 @@ Options:
   --json        output structured JSON
   -h, --help    show this help
 
-Without EXPR, runs an interactive REPL.
+Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
 For an expression starting with '-', use '--' (e.g. diceroll -- -1d4+10).";
 
 fn print_help() {

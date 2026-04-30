@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 
 use rand::Rng;
 use rustyline::DefaultEditor;
@@ -22,6 +22,16 @@ fn handle_line(
         Err(e) => writeln!(err, "parse error: {e}")?,
     }
     Ok(true)
+}
+
+pub fn read_stdin(rng: &mut impl Rng, json: bool) -> io::Result<()> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
+    for line in stdin.lock().lines() {
+        handle_line(&line?, rng, json, &mut stdout, &mut stderr)?;
+    }
+    Ok(())
 }
 
 pub fn repl(rng: &mut impl Rng, json: bool) -> rustyline::Result<()> {
