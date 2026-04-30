@@ -1,0 +1,10 @@
+[package]
+name = "diceroll"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lexopt = "0.3"
+rand = "0.9"
+regex = "1"
+rustyline = "14"
