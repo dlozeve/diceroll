@@ -36,6 +36,8 @@ Roll any dice combination from the command line!
 
 ## Usage
 
+### From the command line
+
 Interactive REPL:
 
 ```bash
@@ -73,22 +75,42 @@ $ diceroll --seed 42 10d20
 10d20[11,11,13,9,1,9,15,17,3,1] = 90
 ```
 
-Local HTTP server:
+### With the local HTTP server
 
 ```bash
 $ diceroll serve --port 8000
+
+# In another terminal:
 $ curl 'http://127.0.0.1:8000/roll?q=2d6%2B3'
 2d6[4,1] + 3 = 8
 $ curl -X POST --data '2d6+3' http://127.0.0.1:8000/roll
 2d6[4,1] + 3 = 8
 $ curl -H 'Accept: application/json' 'http://127.0.0.1:8000/roll?q=2d6%2B3'
 {"total":8,"terms":[...]}
+
+$ curl --get 'http://localhost:8000/stats?samples=10000' --data-urlencode 'q=4d20dl1+2d20'
+samples = 10000
+min     = 14
+max     = 98
+mean    = 58.27
+std_dev = 12.57
+$ curl http://localhost:8000/stats -H "Accept: application/json" -d '4d20dl1+2d20'
+{"samples":1000,"min":19,"max":92,"mean":59.200999999999986,"std_dev":12.209201407135518}
 ```
 
-The server exposes two endpoints:
+The `/roll` endpoint can be used with either GET or POST:
 
 - `GET /roll?q=EXPR`
 - `POST /roll` with the raw expression in the request body
+
+The `/stats` endpoint can be used in the same way:
+
+- `GET /stats?q=EXPR`
+- `POST /stats` with the raw expression in the request body
+- both methods accept an additional `?samples=N` query parameter
+
+For all endpoints:
+
 - Plain text is returned by default
 - Send `Accept: application/json` for JSON
 - Encode arithmetic `+` as `%2B` in the query string, or use `curl --get --data-urlencode 'q=2d6+3'`

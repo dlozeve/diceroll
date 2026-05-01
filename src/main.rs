@@ -212,7 +212,7 @@ Options:
 
 Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
 
-`diceroll serve` exposes a local HTTP server on 127.0.0.1:N with GET /roll?q=... and POST /roll.
+`diceroll serve` exposes a local HTTP server on 127.0.0.1:N with /roll and /stats routes.
 
 `diceroll stats` computes statistics on N rolls of the expression EXPR.
 

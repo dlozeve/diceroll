@@ -4,7 +4,7 @@ use form_urlencoded::parse;
 use rand::Rng;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
-use diceroll::run;
+use diceroll::{run, stats};
 
 pub fn serve<R: Rng>(rng: &mut R, port: u16) -> io::Result<()> {
     let addr = format!("127.0.0.1:{port}");
@@ -13,6 +13,11 @@ pub fn serve<R: Rng>(rng: &mut R, port: u16) -> io::Result<()> {
         handle_request(request, rng);
     }
     Ok(())
+}
+
+enum Route {
+    Roll,
+    Stats,
 }
 
 fn handle_request<R: Rng>(mut request: Request, rng: &mut R) {
@@ -27,9 +32,26 @@ fn build_response<R: Rng>(
     let wants_json = wants_json(request);
     let (path, query) = split_path_and_query(request.url());
 
-    if path != "/roll" {
-        return not_found(wants_json);
-    }
+    let route = match path {
+        "/roll" => Route::Roll,
+        "/stats" => Route::Stats,
+        _ => {
+            return not_found(wants_json);
+        }
+    };
+
+    let samples = match query_param(query, "samples") {
+        Some(s) => match s.parse::<usize>() {
+            Ok(n) => n,
+            Err(e) => {
+                return bad_request(
+                    wants_json,
+                    &format!("malformed query parameter samples: {e}"),
+                );
+            }
+        },
+        None => 1000,
+    };
 
     let expr = match *request.method() {
         Method::Get => {
@@ -54,6 +76,17 @@ fn build_response<R: Rng>(
         }
     };
 
+    match route {
+        Route::Roll => handle_roll(&expr, wants_json, rng),
+        Route::Stats => handle_stats(&expr, wants_json, samples, rng),
+    }
+}
+
+fn handle_roll<R: Rng>(
+    expr: &str,
+    wants_json: bool,
+    rng: &mut R,
+) -> Response<std::io::Cursor<Vec<u8>>> {
     match run(expr.trim(), rng) {
         Ok(result) => {
             if wants_json {
@@ -63,6 +96,27 @@ fn build_response<R: Rng>(
             }
         }
         Err(err) => bad_request(wants_json, &format!("parse error: {err}")),
+    }
+}
+
+fn handle_stats<R: Rng>(
+    expr: &str,
+    wants_json: bool,
+    samples: usize,
+    rng: &mut R,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    match stats::run_stats(expr, samples, rng) {
+        Ok(stats_results) => {
+            if wants_json {
+                match serde_json::to_string(&stats_results) {
+                    Ok(stats_results_json) => response_with_body(200, true, &stats_results_json),
+                    Err(e) => response_with_body(500, true, &format!("error: {e}")),
+                }
+            } else {
+                response_with_body(200, false, &format!("{stats_results}"))
+            }
+        }
+        Err(e) => bad_request(wants_json, &format!("parse error: {e}")),
     }
 }
 
@@ -207,6 +261,117 @@ mod tests {
         let response = build_response(&mut request, &mut rng);
         assert_eq!(response.status_code(), StatusCode(400));
         assert!(collect_body(response).contains(r#""error":"parse error:"#));
+    }
+
+    #[test]
+    fn get_stats_plain_text() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut request = req(Method::Get, "/stats?q=2d6", None);
+        let response = build_response(&mut request, &mut rng);
+
+        let mut expected_rng = StdRng::seed_from_u64(7);
+        let expected = stats::run_stats("2d6", 1000, &mut expected_rng)
+            .unwrap()
+            .to_string();
+
+        assert_eq!(response.status_code(), StatusCode(200));
+        assert_eq!(
+            response
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Content-Type"))
+                .map(|h| h.value.as_str()),
+            Some("text/plain; charset=utf-8")
+        );
+        assert_eq!(collect_body(response), expected);
+    }
+
+    #[test]
+    fn get_stats_json() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut request = req(Method::Get, "/stats?q=2d6", Some("application/json"));
+        let response = build_response(&mut request, &mut rng);
+
+        let mut expected_rng = StdRng::seed_from_u64(7);
+        let expected =
+            serde_json::to_string(&stats::run_stats("2d6", 1000, &mut expected_rng).unwrap())
+                .unwrap();
+
+        assert_eq!(response.status_code(), StatusCode(200));
+        assert_eq!(
+            response
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Content-Type"))
+                .map(|h| h.value.as_str()),
+            Some("application/json; charset=utf-8")
+        );
+        assert_eq!(collect_body(response), expected);
+    }
+
+    #[test]
+    fn get_stats_samples() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let request = TestRequest::new()
+            .with_method(Method::Post)
+            .with_path("/stats?samples=42")
+            .with_body("2d6+3");
+        let mut request: Request = request.into();
+        let response = build_response(&mut request, &mut rng);
+
+        let mut expected_rng = StdRng::seed_from_u64(7);
+        let expected = stats::run_stats("2d6+3", 42, &mut expected_rng)
+            .unwrap()
+            .to_string();
+
+        assert_eq!(response.status_code(), StatusCode(200));
+        assert_eq!(
+            response
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Content-Type"))
+                .map(|h| h.value.as_str()),
+            Some("text/plain; charset=utf-8")
+        );
+        assert_eq!(collect_body(response), expected);
+    }
+
+    #[test]
+    fn get_stats_samples_malformed() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut request = req(Method::Get, "/stats?samples=42x&q=2d6", None);
+        let response = build_response(&mut request, &mut rng);
+
+        assert_eq!(response.status_code(), StatusCode(400));
+        assert_eq!(
+            response
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Content-Type"))
+                .map(|h| h.value.as_str()),
+            Some("text/plain; charset=utf-8")
+        );
+    }
+
+    #[test]
+    fn get_stats_samples_malformed_json() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut request = req(
+            Method::Get,
+            "/stats?samples=42x&q=2d6",
+            Some("application/json"),
+        );
+        let response = build_response(&mut request, &mut rng);
+
+        assert_eq!(response.status_code(), StatusCode(400));
+        assert_eq!(
+            response
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Content-Type"))
+                .map(|h| h.value.as_str()),
+            Some("application/json; charset=utf-8")
+        );
     }
 
     #[test]
