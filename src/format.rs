@@ -186,11 +186,19 @@ mod tests {
     }
 
     #[test]
+    fn display_reroll_shows_modifier() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6r", &mut rng).unwrap();
+        let d = r.display(false);
+        assert!(d.starts_with("4d6r["), "got: {d}");
+    }
+
+    #[test]
     fn display_combined_modifiers_concatenates_them() {
         let mut rng = StdRng::seed_from_u64(1);
-        let r = run("4d6min3kl4", &mut rng).unwrap();
+        let r = run("4d6rmin3kl4", &mut rng).unwrap();
         let d = r.display(false);
-        assert!(d.starts_with("4d6min3kl4["), "got: {d}");
+        assert!(d.starts_with("4d6rmin3kl4["), "got: {d}");
     }
 
     #[test]
@@ -288,9 +296,12 @@ mod tests {
     #[test]
     fn json_output_for_dice_with_combined_modifiers_is_array() {
         let mut rng = StdRng::seed_from_u64(7);
-        let r = run("4d6min3kl4", &mut rng).unwrap();
+        let r = run("4d6rmin3kl4", &mut rng).unwrap();
         let json = r.json();
-        assert!(json.contains(r#""modifier":["min3","kl4"]"#), "got: {json}");
+        assert!(
+            json.contains(r#""modifier":["r","min3","kl4"]"#),
+            "got: {json}"
+        );
     }
 
     #[test]

@@ -114,6 +114,13 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                 if let Some(modifiers) = modifier {
                     for modifier in modifiers {
                         match modifier {
+                            DiceModifier::Reroll => {
+                                for roll in &mut rolls {
+                                    while *roll == 1 {
+                                        *roll = rng.random_range(1..=sides);
+                                    }
+                                }
+                            }
                             DiceModifier::Min(min) => {
                                 for roll in &mut rolls {
                                     *roll = (*roll).max(*min);
@@ -299,6 +306,19 @@ mod tests {
             assert!(matches!(modifier.as_ref().map(|mods| mods.len()), Some(2)));
             assert!(rolls.iter().all(|&r| r >= 3));
             assert_eq!(kept.iter().filter(|&&k| k).count(), 4);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_reroll_replaces_minimum_results() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4d2r", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            assert!(rolls.iter().all(|&r| r == 2));
+            assert!(kept.iter().all(|&k| k));
+            assert_eq!(r.total, 8);
         } else {
             panic!("expected Dice term");
         }

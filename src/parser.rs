@@ -45,6 +45,7 @@ pub enum DiceModifier {
     KeepDrop(KeepDrop),
     Min(u64),
     Max(u64),
+    Reroll,
 }
 
 /// A keep/drop modifier applied to a dice roll.
@@ -73,6 +74,7 @@ impl std::fmt::Display for DiceModifier {
             DiceModifier::KeepDrop(kd) => write!(f, "{kd}"),
             DiceModifier::Min(n) => write!(f, "min{n}"),
             DiceModifier::Max(n) => write!(f, "max{n}"),
+            DiceModifier::Reroll => write!(f, "r"),
         }
     }
 }
@@ -140,6 +142,7 @@ enum RawDiceModifier<'a> {
     KeepDrop(KeepDropCtor, &'a str),
     Min(&'a str),
     Max(&'a str),
+    Reroll,
 }
 
 fn sign_to_i64(c: char) -> i64 {
@@ -167,8 +170,9 @@ fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
     let parse_max = tag("max")
         .and(digit1)
         .map(|(_, count_str)| RawDiceModifier::Max(count_str));
+    let parse_reroll = tag("r").map(|_| RawDiceModifier::Reroll);
 
-    alt((parse_keep_drop, parse_min, parse_max)).parse(input)
+    alt((parse_keep_drop, parse_min, parse_max, parse_reroll)).parse(input)
 }
 
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
@@ -341,6 +345,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                             .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
                         DiceModifier::Max(n)
                     }
+                    RawDiceModifier::Reroll => DiceModifier::Reroll,
                 };
                 parsed_modifiers.push(parsed);
             }
@@ -584,15 +589,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_reroll_modifier() {
+        assert_eq!(
+            parse("4d6r").unwrap(),
+            vec![(1, dice_mod(4, 6, DiceModifier::Reroll))],
+        );
+    }
+
+    #[test]
     fn parse_combined_modifiers() {
         assert_eq!(
-            parse("4d6min3kl4").unwrap(),
+            parse("4d6rmin3kl4").unwrap(),
             vec![(
                 1,
                 dice_mods(
                     4,
                     6,
                     vec![
+                        DiceModifier::Reroll,
                         DiceModifier::Min(3),
                         DiceModifier::KeepDrop(KeepDrop::KeepLowest(4))
                     ]
