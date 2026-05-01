@@ -195,6 +195,14 @@ mod tests {
     }
 
     #[test]
+    fn display_exploding_shows_bang_modifier() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6!", &mut rng).unwrap();
+        let d = r.display(false);
+        assert!(d.starts_with("4d6!["), "got: {d}");
+    }
+
+    #[test]
     fn display_fate_dice_uses_d_f_notation() {
         let mut rng = StdRng::seed_from_u64(1);
         let r = run("4dF", &mut rng).unwrap();

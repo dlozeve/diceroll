@@ -63,6 +63,7 @@ enum RawDiceModifier<'a> {
     Min(&'a str),
     Max(&'a str),
     Reroll,
+    Exploding,
 }
 
 enum RawDiceSides<'a> {
@@ -97,8 +98,16 @@ fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
         .and(digit1)
         .map(|(_, count_str)| RawDiceModifier::Max(count_str));
     let parse_reroll = tag("r").map(|_| RawDiceModifier::Reroll);
+    let parse_exploding = tag("!").map(|_| RawDiceModifier::Exploding);
 
-    alt((parse_keep_drop, parse_min, parse_max, parse_reroll)).parse(input)
+    alt((
+        parse_keep_drop,
+        parse_min,
+        parse_max,
+        parse_reroll,
+        parse_exploding,
+    ))
+    .parse(input)
 }
 
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
@@ -281,6 +290,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                         DiceModifier::Max(n)
                     }
                     RawDiceModifier::Reroll => DiceModifier::Reroll,
+                    RawDiceModifier::Exploding => DiceModifier::Exploding,
                 };
                 parsed_modifiers.push(parsed);
             }
@@ -543,6 +553,18 @@ mod tests {
         assert_eq!(
             parse("4d6r").unwrap(),
             vec![(1, dice_mod(4, 6, DiceModifier::Reroll))],
+        );
+    }
+
+    #[test]
+    fn parse_exploding_modifier() {
+        assert_eq!(
+            parse("4d6!").unwrap(),
+            vec![(1, dice_mod(4, 6, DiceModifier::Exploding))],
+        );
+        assert_eq!(
+            parse("d20!").unwrap(),
+            vec![(1, dice_mod(1, 20, DiceModifier::Exploding))],
         );
     }
 

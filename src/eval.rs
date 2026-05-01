@@ -111,6 +111,13 @@ fn is_natural_minimum(roll: i64, sides: &DiceSides) -> bool {
     }
 }
 
+fn is_natural_maximum(roll: i64, sides: &DiceSides) -> bool {
+    match sides {
+        DiceSides::Numeric(n) => roll == *n as i64,
+        DiceSides::Fate => roll == 1,
+    }
+}
+
 pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
     let mut total: i64 = 0;
     let mut out_terms: Vec<EvalTerm> = Vec::with_capacity(terms.len());
@@ -154,6 +161,16 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                             }
                             DiceModifier::KeepDrop(kd) => {
                                 kept = apply_keep_drop(Some(kd), &rolls);
+                            }
+                            DiceModifier::Exploding => {
+                                for roll in &mut rolls {
+                                    let mut last = *roll;
+                                    while is_natural_maximum(last, &sides) {
+                                        let extra = roll_once(rng, &sides);
+                                        *roll += extra;
+                                        last = extra;
+                                    }
+                                }
                             }
                         }
                     }
@@ -327,6 +344,33 @@ mod tests {
             assert!(matches!(modifier.as_ref().map(|mods| mods.len()), Some(2)));
             assert!(rolls.iter().all(|&r| r >= 3));
             assert_eq!(kept.iter().filter(|&&k| k).count(), 4);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_exploding_keeps_die_count_and_all_kept() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4d6!", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            assert_eq!(rolls.len(), 4);
+            assert!(kept.iter().all(|&k| k));
+            assert!(rolls.iter().all(|&r| r >= 1));
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_exploding_rolls_exceed_sides_when_chained() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let r = run("100d2!", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, .. } = &r.terms[0].kind {
+            assert!(
+                rolls.iter().any(|&r| r > 2),
+                "expected at least one chained explosion in 100d2!"
+            );
         } else {
             panic!("expected Dice term");
         }

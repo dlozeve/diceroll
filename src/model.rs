@@ -4,6 +4,7 @@ pub enum DiceModifier {
     Min(u64),
     Max(u64),
     Reroll,
+    Exploding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,7 @@ impl std::fmt::Display for DiceModifier {
             DiceModifier::Min(n) => write!(f, "min{n}"),
             DiceModifier::Max(n) => write!(f, "max{n}"),
             DiceModifier::Reroll => write!(f, "r"),
+            DiceModifier::Exploding => write!(f, "!"),
         }
     }
 }
