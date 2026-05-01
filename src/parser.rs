@@ -1,6 +1,7 @@
 use nom::{
     IResult, Parser,
     branch::alt,
+    bytes::complete::tag,
     character::complete::{digit0, digit1, multispace0, one_of},
     combinator::opt,
     multi::many0,
@@ -32,8 +33,19 @@ pub enum ParseError {
     TooFewSides,
     #[error("dice count exceeds maximum of {max}")]
     DiceCountExceeded { count: u64, max: u64 },
+    #[error("modifier {modifier} exceeds dice count {count}")]
+    ModifierExceedsDiceCount { count: u64, modifier: u64 },
     #[error("invalid number: '{0}'")]
     InvalidNumber(String),
+}
+
+/// A keep/drop modifier applied to a dice roll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeepDrop {
+    KeepHighest(u64),
+    KeepLowest(u64),
+    DropHighest(u64),
+    DropLowest(u64),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,6 +53,7 @@ pub enum Term {
     Dice {
         count: u64,
         sides: u64,
+        keep_drop: Option<KeepDrop>,
     },
     Const(u64),
     /// A parenthesised sub-expression with an optional integer multiplier.
@@ -53,10 +66,19 @@ pub enum Term {
 
 const MAX_DICE_COUNT: u64 = 1_000_000;
 
+#[derive(Clone, Copy)]
+enum RawModifier {
+    KeepHighest,
+    KeepLowest,
+    DropHighest,
+    DropLowest,
+}
+
 enum RawAtom<'a> {
     Dice {
         count_str: &'a str,
         sides_str: &'a str,
+        modifier: Option<(RawModifier, &'a str)>,
     },
     Const(&'a str),
     Group {
@@ -73,15 +95,29 @@ fn parse_sign(input: &str) -> IResult<&str, char> {
     one_of("+-").parse(input)
 }
 
+fn parse_dice_modifier(input: &str) -> IResult<&str, (RawModifier, &str)> {
+    let (input, kind) = alt((
+        tag("kh").map(|_| RawModifier::KeepHighest),
+        tag("kl").map(|_| RawModifier::KeepLowest),
+        tag("dh").map(|_| RawModifier::DropHighest),
+        tag("dl").map(|_| RawModifier::DropLowest),
+    ))
+    .parse(input)?;
+    let (input, count_str) = digit1(input)?;
+    Ok((input, (kind, count_str)))
+}
+
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
     let (input, count_str) = digit0(input)?;
     let (input, _) = one_of("dD").parse(input)?;
     let (input, sides_str) = digit1(input)?;
+    let (input, modifier) = opt(parse_dice_modifier).parse(input)?;
     Ok((
         input,
         RawAtom::Dice {
             count_str,
             sides_str,
+            modifier,
         },
     ))
 }
@@ -187,6 +223,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
         RawAtom::Dice {
             count_str,
             sides_str,
+            modifier,
         } => {
             let count: u64 = if count_str.is_empty() {
                 1
@@ -210,7 +247,31 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
             if sides < 2 {
                 return Err(ParseError::TooFewSides);
             }
-            Ok((sign, Term::Dice { count, sides }))
+            let keep_drop = match modifier {
+                None => None,
+                Some((kind, s)) => {
+                    let n: u64 = s
+                        .parse()
+                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                    if n > count {
+                        return Err(ParseError::ModifierExceedsDiceCount { count, modifier: n });
+                    }
+                    Some(match kind {
+                        RawModifier::KeepHighest => KeepDrop::KeepHighest(n),
+                        RawModifier::KeepLowest => KeepDrop::KeepLowest(n),
+                        RawModifier::DropHighest => KeepDrop::DropHighest(n),
+                        RawModifier::DropLowest => KeepDrop::DropLowest(n),
+                    })
+                }
+            };
+            Ok((
+                sign,
+                Term::Dice {
+                    count,
+                    sides,
+                    keep_drop,
+                },
+            ))
         }
         RawAtom::Const(num_str) => {
             let n: u64 = num_str
@@ -288,7 +349,7 @@ fn parse_nonempty(trimmed: &str) -> Result<Vec<(i64, Term)>, ParseError> {
 ///
 /// let terms = parse("2d6+3").unwrap();
 /// assert_eq!(terms, vec![
-///     (1,  Term::Dice { count: 2, sides: 6 }),
+///     (1,  Term::Dice { count: 2, sides: 6, keep_drop: None }),
 ///     (1,  Term::Const(3)),
 /// ]);
 ///
@@ -315,7 +376,19 @@ mod tests {
     use super::*;
 
     fn dice(count: u64, sides: u64) -> Term {
-        Term::Dice { count, sides }
+        Term::Dice {
+            count,
+            sides,
+            keep_drop: None,
+        }
+    }
+
+    fn dice_kd(count: u64, sides: u64, keep_drop: KeepDrop) -> Term {
+        Term::Dice {
+            count,
+            sides,
+            keep_drop: Some(keep_drop),
+        }
     }
 
     fn group(terms: Vec<(i64, Term)>, multiplier: u64) -> Term {
@@ -376,6 +449,44 @@ mod tests {
                 (-1, Term::Const(1)),
             ],
         );
+    }
+
+    #[test]
+    fn parse_keep_highest() {
+        assert_eq!(
+            parse("8d4kh3").unwrap(),
+            vec![(1, dice_kd(8, 4, KeepDrop::KeepHighest(3)))],
+        );
+    }
+
+    #[test]
+    fn parse_keep_lowest() {
+        assert_eq!(
+            parse("4d6kl2").unwrap(),
+            vec![(1, dice_kd(4, 6, KeepDrop::KeepLowest(2)))],
+        );
+    }
+
+    #[test]
+    fn parse_drop_highest() {
+        assert_eq!(
+            parse("4d6dh1").unwrap(),
+            vec![(1, dice_kd(4, 6, KeepDrop::DropHighest(1)))],
+        );
+    }
+
+    #[test]
+    fn parse_drop_lowest() {
+        assert_eq!(
+            parse("4d6dl1").unwrap(),
+            vec![(1, dice_kd(4, 6, KeepDrop::DropLowest(1)))],
+        );
+    }
+
+    #[test]
+    fn parse_modifier_equals_count_is_ok() {
+        assert!(parse("4d6kh4").is_ok());
+        assert!(parse("4d6dl4").is_ok());
     }
 
     #[test]
@@ -571,6 +682,24 @@ mod tests {
     }
 
     #[test]
+    fn error_modifier_exceeds_count() {
+        assert!(matches!(
+            parse("4d6kh5"),
+            Err(ParseError::ModifierExceedsDiceCount {
+                count: 4,
+                modifier: 5
+            })
+        ));
+        assert!(matches!(
+            parse("4d6dl5"),
+            Err(ParseError::ModifierExceedsDiceCount {
+                count: 4,
+                modifier: 5
+            })
+        ));
+    }
+
+    #[test]
     fn error_invalid_number() {
         let big = "9".repeat(30);
         assert!(matches!(
@@ -609,6 +738,14 @@ mod tests {
             }
             .to_string(),
             "dice count exceeds maximum of 1000000"
+        );
+        assert_eq!(
+            ParseError::ModifierExceedsDiceCount {
+                count: 4,
+                modifier: 5
+            }
+            .to_string(),
+            "modifier 5 exceeds dice count 4"
         );
         assert_eq!(
             ParseError::InvalidNumber("xyz".into()).to_string(),

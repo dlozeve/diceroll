@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use rand::Rng;
 
-use crate::parser::{ParseError, Term, parse};
+use crate::parser::{KeepDrop, ParseError, Term, parse};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EvalResult {
@@ -22,7 +22,10 @@ pub enum EvalTermKind {
     Dice {
         count: u64,
         sides: u64,
+        keep_drop: Option<KeepDrop>,
         rolls: Vec<u64>,
+        /// Parallel to `rolls`; `false` means the die was dropped.
+        kept: Vec<bool>,
     },
     Const(u64),
     Group {
@@ -53,6 +56,49 @@ pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, ParseError> {
     Ok(evaluate(&terms, rng))
 }
 
+/// Returns a `kept` mask parallel to `rolls`: `false` = dropped.
+fn apply_keep_drop(keep_drop: Option<&KeepDrop>, rolls: &[u64]) -> Vec<bool> {
+    let n = rolls.len();
+    let Some(kd) = keep_drop else {
+        return vec![true; n];
+    };
+    let mut indices: Vec<usize> = (0..n).collect();
+    match kd {
+        KeepDrop::KeepHighest(k) => {
+            indices.sort_by(|&a, &b| rolls[b].cmp(&rolls[a]));
+            let mut kept = vec![false; n];
+            for &i in indices.iter().take(*k as usize) {
+                kept[i] = true;
+            }
+            kept
+        }
+        KeepDrop::KeepLowest(k) => {
+            indices.sort_by(|&a, &b| rolls[a].cmp(&rolls[b]));
+            let mut kept = vec![false; n];
+            for &i in indices.iter().take(*k as usize) {
+                kept[i] = true;
+            }
+            kept
+        }
+        KeepDrop::DropHighest(k) => {
+            indices.sort_by(|&a, &b| rolls[b].cmp(&rolls[a]));
+            let mut kept = vec![true; n];
+            for &i in indices.iter().take(*k as usize) {
+                kept[i] = false;
+            }
+            kept
+        }
+        KeepDrop::DropLowest(k) => {
+            indices.sort_by(|&a, &b| rolls[a].cmp(&rolls[b]));
+            let mut kept = vec![true; n];
+            for &i in indices.iter().take(*k as usize) {
+                kept[i] = false;
+            }
+            kept
+        }
+    }
+}
+
 pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
     let mut total: i64 = 0;
     let mut out_terms: Vec<EvalTerm> = Vec::with_capacity(terms.len());
@@ -60,21 +106,30 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
     for (sign, term) in terms {
         let sign = *sign;
         let (kind, subtotal) = match term {
-            Term::Dice { count, sides } => {
+            Term::Dice {
+                count,
+                sides,
+                keep_drop,
+            } => {
                 let count = *count;
                 let sides = *sides;
-                let mut sum: u64 = 0;
                 let mut rolls: Vec<u64> = Vec::with_capacity(count as usize);
                 for _ in 0..count {
-                    let r = rng.random_range(1..=sides);
-                    sum += r;
-                    rolls.push(r);
+                    rolls.push(rng.random_range(1..=sides));
                 }
+                let kept = apply_keep_drop(keep_drop.as_ref(), &rolls);
+                let sum: u64 = rolls
+                    .iter()
+                    .zip(kept.iter())
+                    .map(|(r, k)| if *k { *r } else { 0 })
+                    .sum();
                 (
                     EvalTermKind::Dice {
                         count,
                         sides,
+                        keep_drop: keep_drop.clone(),
                         rolls,
+                        kept,
                     },
                     sign * sum as i64,
                 )
@@ -124,14 +179,36 @@ fn format_terms(terms: &[EvalTerm]) -> String {
             EvalTermKind::Dice {
                 count,
                 sides,
+                keep_drop,
                 rolls,
+                kept,
             } => {
-                let _ = write!(out, "{count}d{sides}[");
-                for (i, r) in rolls.iter().enumerate() {
+                let _ = write!(out, "{count}d{sides}");
+                match keep_drop {
+                    Some(KeepDrop::KeepHighest(n)) => {
+                        let _ = write!(out, "kh{n}");
+                    }
+                    Some(KeepDrop::KeepLowest(n)) => {
+                        let _ = write!(out, "kl{n}");
+                    }
+                    Some(KeepDrop::DropHighest(n)) => {
+                        let _ = write!(out, "dh{n}");
+                    }
+                    Some(KeepDrop::DropLowest(n)) => {
+                        let _ = write!(out, "dl{n}");
+                    }
+                    None => {}
+                }
+                out.push('[');
+                for (i, (r, &k)) in rolls.iter().zip(kept.iter()).enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
-                    let _ = write!(out, "{r}");
+                    if k {
+                        let _ = write!(out, "{r}");
+                    } else {
+                        let _ = write!(out, "{{{r}}}");
+                    }
                 }
                 out.push(']');
             }
@@ -159,18 +236,46 @@ fn write_term_json(out: &mut String, term: &EvalTerm) {
         EvalTermKind::Dice {
             count,
             sides,
+            keep_drop,
             rolls,
+            kept,
         } => {
             let _ = write!(
                 out,
-                "{{\"kind\":\"dice\",\"sign\":{},\"count\":{count},\"sides\":{sides},\"rolls\":[",
+                "{{\"kind\":\"dice\",\"sign\":{},\"count\":{count},\"sides\":{sides},",
                 term.sign
             );
+            if let Some(kd) = keep_drop {
+                out.push_str("\"modifier\":\"");
+                match kd {
+                    KeepDrop::KeepHighest(n) => {
+                        let _ = write!(out, "kh{n}");
+                    }
+                    KeepDrop::KeepLowest(n) => {
+                        let _ = write!(out, "kl{n}");
+                    }
+                    KeepDrop::DropHighest(n) => {
+                        let _ = write!(out, "dh{n}");
+                    }
+                    KeepDrop::DropLowest(n) => {
+                        let _ = write!(out, "dl{n}");
+                    }
+                }
+                out.push_str("\",");
+            }
+            out.push_str("\"rolls\":[");
             for (j, r) in rolls.iter().enumerate() {
                 if j > 0 {
                     out.push(',');
                 }
                 let _ = write!(out, "{r}");
+            }
+            out.push_str("],\"kept\":[");
+            for (j, &k) in kept.iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                out.push_str(if k { "true" } else { "false" });
             }
             let _ = write!(out, "],\"subtotal\":{}}}", term.subtotal);
         }
@@ -203,6 +308,7 @@ fn write_term_json(out: &mut String, term: &EvalTerm) {
 
 impl EvalResult {
     /// Returns a human-readable breakdown: each term with its rolls, then the total.
+    /// Dropped dice are shown in curly braces, e.g. `4d6dl1[5,4,3,{1}]`.
     ///
     /// # Examples
     ///
@@ -305,6 +411,80 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_drop_lowest_total_within_bounds() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6dl1", &mut rng).unwrap();
+        // drop 1 lowest → sum of best 3d6 in [3, 18]
+        assert!((3..=18).contains(&r.total));
+    }
+
+    #[test]
+    fn evaluate_drop_lowest_keeps_correct_count() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6dl1", &mut rng).unwrap();
+        if let EvalTermKind::Dice { kept, .. } = &r.terms[0].kind {
+            assert_eq!(kept.iter().filter(|&&k| k).count(), 3);
+            assert_eq!(kept.iter().filter(|&&k| !k).count(), 1);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_keep_highest_picks_max() {
+        // with only 2 sides, we can verify the kept die is the max
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4d2kh1", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            let max_roll = *rolls.iter().max().unwrap();
+            let kept_roll: u64 = rolls
+                .iter()
+                .zip(kept.iter())
+                .map(|(r, k)| if *k { *r } else { 0 })
+                .sum();
+            assert_eq!(kept_roll, max_roll);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_keep_lowest_picks_min() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4d2kl1", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            let min_roll = *rolls.iter().min().unwrap();
+            let kept_roll: u64 = rolls
+                .iter()
+                .zip(kept.iter())
+                .map(|(r, k)| if *k { *r } else { 0 })
+                .sum();
+            assert_eq!(kept_roll, min_roll);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_drop_lowest_display_shows_modifier_and_braces() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6dl1", &mut rng).unwrap();
+        let d = r.display();
+        assert!(d.starts_with("4d6dl1["), "got: {d}");
+        assert!(d.contains('{'), "dropped die not in braces: {d}");
+        assert!(d.contains('}'), "dropped die not in braces: {d}");
+    }
+
+    #[test]
+    fn evaluate_no_modifier_display_unchanged() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6", &mut rng).unwrap();
+        let d = r.display();
+        assert!(d.starts_with("4d6["), "got: {d}");
+        assert!(!d.contains('{'));
+    }
+
+    #[test]
     fn evaluate_group_total_within_bounds() {
         let mut rng = StdRng::seed_from_u64(5);
         let r = run("(2d6+3)*2", &mut rng).unwrap();
@@ -368,6 +548,14 @@ mod tests {
     }
 
     #[test]
+    fn subtotals_sum_to_total_with_keep_drop() {
+        let mut rng = StdRng::seed_from_u64(77);
+        let r = run("4d6dl1+2d8kh1", &mut rng).unwrap();
+        let computed: i64 = r.terms.iter().map(|t| t.subtotal).sum();
+        assert_eq!(computed, r.total);
+    }
+
+    #[test]
     fn json_output_for_constants_is_exact() {
         let mut rng = StdRng::seed_from_u64(0);
         let r = run("3+4-1", &mut rng).unwrap();
@@ -387,9 +575,21 @@ mod tests {
         assert!(json.contains(r#""count":2"#));
         assert!(json.contains(r#""sides":6"#));
         assert!(json.contains(r#""rolls":["#));
+        assert!(json.contains(r#""kept":["#));
         assert!(json.contains(r#""kind":"const""#));
         assert!(json.contains(r#""value":3"#));
         assert!(json.ends_with("]}"));
+    }
+
+    #[test]
+    fn json_output_for_dice_with_modifier_has_modifier_field() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let r = run("4d6dl1", &mut rng).unwrap();
+        let json = r.json();
+        assert!(json.contains(r#""modifier":"dl1""#));
+        assert!(json.contains(r#""kept":["#));
+        // one false in the kept array
+        assert!(json.contains("false"));
     }
 
     #[test]
