@@ -16,6 +16,7 @@ pub mod eval;
 pub mod format;
 pub mod model;
 pub mod parser;
+pub mod stats;
 
 pub use eval::{EvalResult, EvalTerm, EvalTermKind, evaluate, run};
 pub use model::{DiceModifier, DiceSides, KeepDrop, Term};

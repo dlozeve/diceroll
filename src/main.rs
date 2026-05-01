@@ -13,12 +13,14 @@ mod repl;
 mod server;
 
 use diceroll::run;
+use diceroll::stats;
 use repl::{read_stdin, repl};
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Run,
     Serve { port: u16 },
+    Stats { samples: usize },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,30 +56,56 @@ fn run_mode<R: Rng>(args: Args, rng: &mut R) {
                 process::exit(1);
             }
         }
-        Command::Run => dispatch(args.expr.as_deref(), args.json, args.no_color, rng),
+        Command::Run => dispatch_run(args.expr.as_deref(), args.json, args.no_color, rng),
+        Command::Stats { samples } => dispatch_stats(args.expr.as_deref(), args.json, samples, rng),
     }
 }
 
-fn dispatch<R: Rng>(expr: Option<&str>, json: bool, no_color: bool, rng: &mut R) {
+fn dispatch_run<R: Rng>(expr: Option<&str>, json: bool, no_color: bool, rng: &mut R) {
     use std::io::IsTerminal;
     let color =
         !json && !no_color && env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal();
-    let Some(expr) = expr else {
-        if std::io::stdin().is_terminal() {
-            if let Err(e) = repl(rng, json, color) {
-                eprintln!("repl error: {e}");
+    match expr {
+        Some(expr) => match run(expr, rng) {
+            Ok(r) => println!("{}", r.formatted(json, color)),
+            Err(e) => {
+                eprintln!("parse error: {e}");
                 process::exit(1);
             }
-        } else if let Err(e) = read_stdin(rng, json, color) {
-            eprintln!("stdin error: {e}");
-            process::exit(1);
+        },
+        None => {
+            if std::io::stdin().is_terminal() {
+                if let Err(e) = repl(rng, json, color) {
+                    eprintln!("repl error: {e}");
+                    process::exit(1);
+                }
+            } else if let Err(e) = read_stdin(rng, json, color) {
+                eprintln!("stdin error: {e}");
+                process::exit(1);
+            }
         }
-        return;
-    };
-    match run(expr, rng) {
-        Ok(r) => println!("{}", r.formatted(json, color)),
-        Err(e) => {
-            eprintln!("parse error: {e}");
+    }
+}
+
+fn dispatch_stats<R: Rng>(expr: Option<&str>, json: bool, samples: usize, rng: &mut R) {
+    match expr {
+        Some(expr) => match stats::run_stats(expr, samples, rng) {
+            Ok(stats_results) if json => match serde_json::to_string(&stats_results) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("formatting error: {e}")
+                }
+            },
+            Ok(stats_results) => {
+                println!("{stats_results}")
+            }
+            Err(e) => {
+                eprintln!("parse error: {e}");
+                process::exit(1);
+            }
+        },
+        None => {
+            eprintln!("expression required for stats");
             process::exit(1);
         }
     }
@@ -95,6 +123,7 @@ where
     let mut parts: Vec<String> = Vec::new();
     let mut command = Command::Run;
     let mut serve_port: Option<u16> = None;
+    let mut stats_samples: Option<usize> = None;
 
     while let Some(arg) = parser.next()? {
         match arg {
@@ -102,6 +131,7 @@ where
             Long("json") => json = true,
             Long("no-color") => no_color = true,
             Long("port") => serve_port = Some(parser.value()?.parse()?),
+            Long("samples") => stats_samples = Some(parser.value()?.parse()?),
             Short('h') | Long("help") => {
                 print_help();
                 process::exit(0);
@@ -111,6 +141,10 @@ where
                 if command == Command::Run && parts.is_empty() && value == "serve" {
                     command = Command::Serve {
                         port: serve_port.take().unwrap_or(8000),
+                    };
+                } else if command == Command::Run && parts.is_empty() && value == "stats" {
+                    command = Command::Stats {
+                        samples: stats_samples.take().unwrap_or(1000),
                     };
                 } else if matches!(command, Command::Serve { .. }) {
                     return Err(lexopt::Error::UnexpectedArgument(value.into()));
@@ -132,11 +166,27 @@ where
             if serve_port.is_some() {
                 return Err(lexopt::Error::UnexpectedArgument("--port".into()));
             }
+            if stats_samples.is_some() {
+                return Err(lexopt::Error::UnexpectedArgument("--samples".into()));
+            }
             Command::Run
         }
-        Command::Serve { port } => Command::Serve {
-            port: serve_port.unwrap_or(port),
-        },
+        Command::Serve { port } => {
+            if stats_samples.is_some() {
+                return Err(lexopt::Error::UnexpectedArgument("--samples".into()));
+            }
+            Command::Serve {
+                port: serve_port.unwrap_or(port),
+            }
+        }
+        Command::Stats { samples } => {
+            if serve_port.is_some() {
+                return Err(lexopt::Error::UnexpectedArgument("--port".into()));
+            }
+            Command::Stats {
+                samples: stats_samples.unwrap_or(samples),
+            }
+        }
     };
     Ok(Args {
         seed,
@@ -150,17 +200,21 @@ where
 const HELP: &str = "\
 Usage: diceroll [--seed N] [--json] [--no-color] [EXPR]
        diceroll serve [--port N]
+       diceroll stats [--samples N] EXPR
 
 Options:
   --seed N      seed the RNG for reproducible rolls
   --json        output structured JSON
   --no-color    disable ANSI color output (also honoured via NO_COLOR env var)
   --port N      port for `serve` (default: 8000)
+  --samples N   number of samples on which to compute statistics (default: 1000)
   -h, --help    show this help
 
 Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
 
-`diceroll serve` exposes a local HTTP server on 127.0.0.1:N with GET /roll?q=... and POST /roll
+`diceroll serve` exposes a local HTTP server on 127.0.0.1:N with GET /roll?q=... and POST /roll.
+
+`diceroll stats` computes statistics on N rolls of the expression EXPR.
 
 For an expression starting with '-', use '--' (e.g. diceroll -- -1d4+10).";
 
