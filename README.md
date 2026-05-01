@@ -26,13 +26,24 @@ Roll any dice combination from the command line!
 
 ## Dice notation
 
+Dice:
+
 - Use any number of dice with any number of sides: `d20`, `4d7`
+- `d%` is an alias for `d100`
+- Fate dice: `dF` or `4dF` roll values in `{-1, 0, 1}`
+
+Combinations:
+
 - Combine several dice by adding or subtracting them, along with constants: `3d6 - 2`
 - Multipliers and grouping: `d20 + (2d6+3)*2 + 5`
+
+Modifiers:
+
 - Keep/drop highest/lowest: `6d4dl2` drops the 2 lowest dice, `2d20kh1` keeps the highest (advantage), `2d20kl1` keeps the lowest (disadvantage)
 - Clamp dice results with minimum/maximum values: `4d6min3` treats any die below 3 as 3, `4d6max4` caps any die above 4 at 4
-- Re-roll minimum results: `4d6r` rerolls any 1 until the die stops showing 1. Modifiers can be chained, e.g. `4d6rmin3kl4`
-- Fate dice: `dF` or `4dF` roll values in `{-1, 0, 1}`
+- Re-roll minimum results: `4d6r` rerolls any 1 until the die stops showing 1.
+- Exploding dice: `4d6!` rerolls any dice which rolled the highest possible number, with each successive roll being added to the result
+- Modifiers can be chained, e.g. `4d6rmin3kl4`
 
 ## Usage
 
@@ -73,6 +84,17 @@ $ diceroll --seed 42 10d20
 10d20[11,11,13,9,1,9,15,17,3,1] = 90
 $ diceroll --seed 42 10d20
 10d20[11,11,13,9,1,9,15,17,3,1] = 90
+```
+
+Compute statistics for a given expression:
+
+```bash
+$ diceroll stats --samples 10000 4d12+d10-4
+samples = 10000
+min     = 3
+max     = 52
+mean    = 27.61
+std_dev = 7.54
 ```
 
 ### With the local HTTP server
