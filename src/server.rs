@@ -40,19 +40,8 @@ fn build_response<R: Rng>(
         }
     };
 
-    let samples = match query_param(query, "samples") {
-        Some(s) => match s.parse::<usize>() {
-            Ok(n) => n,
-            Err(e) => {
-                return bad_request(
-                    wants_json,
-                    &format!("malformed query parameter samples: {e}"),
-                );
-            }
-        },
-        None => 1000,
-    };
-
+    // Must be extracted before the POST body read, which mutably borrows the request.
+    let samples_raw = query_param(query, "samples");
     let expr = match *request.method() {
         Method::Get => {
             let Some(expr) = query_param(query, "q") else {
@@ -78,7 +67,21 @@ fn build_response<R: Rng>(
 
     match route {
         Route::Roll => handle_roll(&expr, wants_json, rng),
-        Route::Stats => handle_stats(&expr, wants_json, samples, rng),
+        Route::Stats => {
+            let samples = match samples_raw {
+                Some(s) => match s.parse::<usize>() {
+                    Ok(n) => n,
+                    Err(e) => {
+                        return bad_request(
+                            wants_json,
+                            &format!("malformed query parameter samples: {e}"),
+                        );
+                    }
+                },
+                None => 1000,
+            };
+            handle_stats(&expr, wants_json, samples, rng)
+        }
     }
 }
 

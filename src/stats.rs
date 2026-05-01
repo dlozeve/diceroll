@@ -36,7 +36,12 @@ impl fmt::Display for StatsResult {
 /// # Examples
 ///
 /// ```
+/// use rand::SeedableRng;
+/// use rand::rngs::StdRng;
 ///
+/// let mut rng = StdRng::seed_from_u64(0);
+/// let result = diceroll::stats::run_stats("2d6+3", 1000, &mut rng).unwrap();
+/// assert!(result.min >= 5 && result.max <= 15);
 /// ```
 pub fn run_stats(
     expr: &str,
