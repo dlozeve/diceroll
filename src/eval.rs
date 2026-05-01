@@ -25,6 +25,10 @@ pub enum EvalTermKind {
         rolls: Vec<u64>,
     },
     Const(u64),
+    Group {
+        terms: Vec<EvalTerm>,
+        multiplier: u64,
+    },
 }
 
 /// Parses and evaluates a dice expression, returning a full breakdown.
@@ -55,8 +59,10 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
 
     for (sign, term) in terms {
         let sign = *sign;
-        let (kind, subtotal) = match *term {
+        let (kind, subtotal) = match term {
             Term::Dice { count, sides } => {
+                let count = *count;
+                let sides = *sides;
                 let mut sum: u64 = 0;
                 let mut rolls: Vec<u64> = Vec::with_capacity(count as usize);
                 for _ in 0..count {
@@ -73,7 +79,21 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                     sign * sum as i64,
                 )
             }
-            Term::Const(n) => (EvalTermKind::Const(n), sign * n as i64),
+            Term::Const(n) => (EvalTermKind::Const(*n), sign * *n as i64),
+            Term::Group {
+                terms: inner_terms,
+                multiplier,
+            } => {
+                let inner = evaluate(inner_terms, rng);
+                let subtotal = sign * (*multiplier as i64) * inner.total;
+                (
+                    EvalTermKind::Group {
+                        terms: inner.terms,
+                        multiplier: *multiplier,
+                    },
+                    subtotal,
+                )
+            }
         };
         total += subtotal;
         out_terms.push(EvalTerm {
@@ -86,6 +106,98 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
     EvalResult {
         total,
         terms: out_terms,
+    }
+}
+
+fn format_terms(terms: &[EvalTerm]) -> String {
+    let mut out = String::new();
+    for (idx, term) in terms.iter().enumerate() {
+        let op = if term.sign < 0 {
+            " - "
+        } else if idx == 0 {
+            ""
+        } else {
+            " + "
+        };
+        out.push_str(op);
+        match &term.kind {
+            EvalTermKind::Dice {
+                count,
+                sides,
+                rolls,
+            } => {
+                let _ = write!(out, "{count}d{sides}[");
+                for (i, r) in rolls.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    let _ = write!(out, "{r}");
+                }
+                out.push(']');
+            }
+            EvalTermKind::Const(n) => {
+                let _ = write!(out, "{n}");
+            }
+            EvalTermKind::Group {
+                terms: inner,
+                multiplier,
+            } => {
+                out.push('(');
+                out.push_str(&format_terms(inner));
+                out.push(')');
+                if *multiplier != 1 {
+                    let _ = write!(out, " * {multiplier}");
+                }
+            }
+        }
+    }
+    out
+}
+
+fn write_term_json(out: &mut String, term: &EvalTerm) {
+    match &term.kind {
+        EvalTermKind::Dice {
+            count,
+            sides,
+            rolls,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"kind\":\"dice\",\"sign\":{},\"count\":{count},\"sides\":{sides},\"rolls\":[",
+                term.sign
+            );
+            for (j, r) in rolls.iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                let _ = write!(out, "{r}");
+            }
+            let _ = write!(out, "],\"subtotal\":{}}}", term.subtotal);
+        }
+        EvalTermKind::Const(n) => {
+            let _ = write!(
+                out,
+                "{{\"kind\":\"const\",\"sign\":{},\"value\":{n},\"subtotal\":{}}}",
+                term.sign, term.subtotal,
+            );
+        }
+        EvalTermKind::Group {
+            terms: inner_terms,
+            multiplier,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"kind\":\"group\",\"sign\":{},\"multiplier\":{multiplier},\"subtotal\":{},\"terms\":[",
+                term.sign, term.subtotal
+            );
+            for (j, t) in inner_terms.iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                write_term_json(out, t);
+            }
+            out.push_str("]}");
+        }
     }
 }
 
@@ -103,37 +215,7 @@ impl EvalResult {
     /// assert_eq!(result.display(), "3 + 4 - 1");
     /// ```
     pub fn display(&self) -> String {
-        let mut out = String::new();
-        for (idx, term) in self.terms.iter().enumerate() {
-            let op = if term.sign < 0 {
-                " - "
-            } else if idx == 0 {
-                ""
-            } else {
-                " + "
-            };
-            out.push_str(op);
-            match &term.kind {
-                EvalTermKind::Dice {
-                    count,
-                    sides,
-                    rolls,
-                } => {
-                    let _ = write!(out, "{count}d{sides}[");
-                    for (i, r) in rolls.iter().enumerate() {
-                        if i > 0 {
-                            out.push(',');
-                        }
-                        let _ = write!(out, "{r}");
-                    }
-                    out.push(']');
-                }
-                EvalTermKind::Const(n) => {
-                    let _ = write!(out, "{n}");
-                }
-            }
-        }
-        out
+        format_terms(&self.terms)
     }
 
     pub fn json(&self) -> String {
@@ -143,33 +225,7 @@ impl EvalResult {
             if i > 0 {
                 out.push(',');
             }
-            match &term.kind {
-                EvalTermKind::Dice {
-                    count,
-                    sides,
-                    rolls,
-                } => {
-                    let _ = write!(
-                        out,
-                        "{{\"kind\":\"dice\",\"sign\":{},\"count\":{count},\"sides\":{sides},\"rolls\":[",
-                        term.sign
-                    );
-                    for (j, r) in rolls.iter().enumerate() {
-                        if j > 0 {
-                            out.push(',');
-                        }
-                        let _ = write!(out, "{r}");
-                    }
-                    let _ = write!(out, "],\"subtotal\":{}}}", term.subtotal);
-                }
-                EvalTermKind::Const(n) => {
-                    let _ = write!(
-                        out,
-                        "{{\"kind\":\"const\",\"sign\":{},\"value\":{n},\"subtotal\":{}}}",
-                        term.sign, term.subtotal,
-                    );
-                }
-            }
+            write_term_json(&mut out, term);
         }
         out.push_str("]}");
         out
@@ -249,6 +305,69 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_group_total_within_bounds() {
+        let mut rng = StdRng::seed_from_u64(5);
+        let r = run("(2d6+3)*2", &mut rng).unwrap();
+        // 2d6 in [2,12], +3 → [5,15], *2 → [10,30]
+        assert!((10..=30).contains(&r.total));
+        assert_eq!(r.terms.len(), 1);
+    }
+
+    #[test]
+    fn evaluate_group_display() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("(2d6+3)*2", &mut rng).unwrap();
+        let d = r.display();
+        assert!(d.starts_with('('));
+        assert!(d.contains("2d6["));
+        assert!(d.contains("] + 3)"));
+        assert!(d.ends_with(" * 2"));
+    }
+
+    #[test]
+    fn evaluate_group_no_multiplier_display() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("(d6)", &mut rng).unwrap();
+        let d = r.display();
+        assert!(d.starts_with('('));
+        assert!(d.ends_with(')'));
+        assert!(!d.contains('*'));
+    }
+
+    #[test]
+    fn evaluate_full_expression_with_group() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let r = run("d20 + (2d6+3)*2 + 5", &mut rng).unwrap();
+        assert_eq!(r.terms.len(), 3);
+        // total = d20 + (2d6+3)*2 + 5; d20 in [1,20], group in [10,30]
+        assert!((16..=55).contains(&r.total));
+    }
+
+    #[test]
+    fn evaluate_nested_groups() {
+        let mut rng = StdRng::seed_from_u64(3);
+        let r = run("((d6+1)*2+3)*4", &mut rng).unwrap();
+        // d6 in [1,6], +1 → [2,7], *2 → [4,14], +3 → [7,17], *4 → [28,68]
+        assert!((28..=68).contains(&r.total));
+    }
+
+    #[test]
+    fn subtotals_sum_to_total() {
+        let mut rng = StdRng::seed_from_u64(31);
+        let r = run("4d6-1d4+2", &mut rng).unwrap();
+        let computed: i64 = r.terms.iter().map(|t| t.subtotal).sum();
+        assert_eq!(computed, r.total);
+    }
+
+    #[test]
+    fn subtotals_sum_to_total_with_group() {
+        let mut rng = StdRng::seed_from_u64(55);
+        let r = run("d20 + (2d6+3)*2 + 5", &mut rng).unwrap();
+        let computed: i64 = r.terms.iter().map(|t| t.subtotal).sum();
+        assert_eq!(computed, r.total);
+    }
+
+    #[test]
     fn json_output_for_constants_is_exact() {
         let mut rng = StdRng::seed_from_u64(0);
         let r = run("3+4-1", &mut rng).unwrap();
@@ -274,10 +393,14 @@ mod tests {
     }
 
     #[test]
-    fn subtotals_sum_to_total() {
-        let mut rng = StdRng::seed_from_u64(31);
-        let r = run("4d6-1d4+2", &mut rng).unwrap();
-        let computed: i64 = r.terms.iter().map(|t| t.subtotal).sum();
-        assert_eq!(computed, r.total);
+    fn json_output_for_group_has_expected_shape() {
+        let mut rng = StdRng::seed_from_u64(9);
+        let r = run("(2d6+3)*2", &mut rng).unwrap();
+        let json = r.json();
+        assert!(json.contains(r#""kind":"group""#));
+        assert!(json.contains(r#""multiplier":2"#));
+        assert!(json.contains(r#""kind":"dice""#));
+        assert!(json.contains(r#""kind":"const""#));
+        assert!(json.ends_with("]}"));
     }
 }

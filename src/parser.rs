@@ -38,8 +38,17 @@ pub enum ParseError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Term {
-    Dice { count: u64, sides: u64 },
+    Dice {
+        count: u64,
+        sides: u64,
+    },
     Const(u64),
+    /// A parenthesised sub-expression with an optional integer multiplier.
+    /// `(2d6+3)*2` produces `Group { terms: [...], multiplier: 2 }`.
+    Group {
+        terms: Vec<(i64, Term)>,
+        multiplier: u64,
+    },
 }
 
 const MAX_DICE_COUNT: u64 = 1_000_000;
@@ -50,6 +59,10 @@ enum RawAtom<'a> {
         sides_str: &'a str,
     },
     Const(&'a str),
+    Group {
+        inner: &'a str,
+        multiplier_str: Option<&'a str>,
+    },
 }
 
 fn sign_to_i64(c: char) -> i64 {
@@ -78,8 +91,80 @@ fn parse_constant(input: &str) -> IResult<&str, RawAtom<'_>> {
     Ok((input, RawAtom::Const(num_str)))
 }
 
+fn parse_multiplier_str(input: &str) -> IResult<&str, &str> {
+    let (input, _) = multispace0(input)?;
+    let (input, _) = one_of("*").parse(input)?;
+    let (input, _) = multispace0(input)?;
+    digit1(input)
+}
+
+/// Parses `'(' inner ')'` and returns `(after_close, inner)`.
+fn parse_group_body(input: &str) -> IResult<&str, &str> {
+    let after_open = input.strip_prefix('(').ok_or_else(|| {
+        nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char))
+    })?;
+
+    // Find the matching ')' by tracking nesting depth.
+    let mut depth = 1usize;
+    let mut close_pos = None;
+    for (i, c) in after_open.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close_pos = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let close_pos = close_pos.ok_or_else(|| {
+        nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char))
+    })?;
+
+    Ok((&after_open[close_pos + 1..], &after_open[..close_pos]))
+}
+
+/// Parses `'(' expr ')' ('*' N)?` — suffix multiplier form.
+fn parse_group_suffix(input: &str) -> IResult<&str, RawAtom<'_>> {
+    let (after_close, inner) = parse_group_body(input)?;
+    let (remaining, multiplier_str) = opt(parse_multiplier_str).parse(after_close)?;
+    Ok((
+        remaining,
+        RawAtom::Group {
+            inner,
+            multiplier_str,
+        },
+    ))
+}
+
+/// Parses `N '*' '(' expr ')'` — prefix multiplier form.
+fn parse_group_prefix(input: &str) -> IResult<&str, RawAtom<'_>> {
+    let (input, multiplier_str) = digit1(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, _) = one_of("*").parse(input)?;
+    let (input, _) = multispace0(input)?;
+    let (remaining, inner) = parse_group_body(input)?;
+    Ok((
+        remaining,
+        RawAtom::Group {
+            inner,
+            multiplier_str: Some(multiplier_str),
+        },
+    ))
+}
+
 fn parse_atom(input: &str) -> IResult<&str, RawAtom<'_>> {
-    alt((parse_dice, parse_constant)).parse(input)
+    alt((
+        parse_group_prefix,
+        parse_group_suffix,
+        parse_dice,
+        parse_constant,
+    ))
+    .parse(input)
 }
 
 fn parse_first_term(input: &str) -> IResult<&str, (Option<char>, RawAtom<'_>)> {
@@ -133,7 +218,53 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                 .map_err(|_| ParseError::InvalidNumber(num_str.to_owned()))?;
             Ok((sign, Term::Const(n)))
         }
+        RawAtom::Group {
+            inner,
+            multiplier_str,
+        } => {
+            let multiplier: u64 = match multiplier_str {
+                Some(s) => s
+                    .parse()
+                    .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?,
+                None => 1,
+            };
+            let inner_trimmed = inner.trim();
+            if inner_trimmed.is_empty() {
+                return Err(ParseError::Empty);
+            }
+            let terms = parse_nonempty(inner_trimmed)?;
+            Ok((sign, Term::Group { terms, multiplier }))
+        }
     }
+}
+
+fn parse_nonempty(trimmed: &str) -> Result<Vec<(i64, Term)>, ParseError> {
+    let (remaining, (sign_ch, first_raw)) =
+        parse_first_term(trimmed).map_err(|_| ParseError::Unexpected {
+            token: trimmed.to_owned(),
+        })?;
+
+    let (remaining, rest_raw) = many0(parse_subsequent_term)
+        .parse(remaining)
+        .unwrap_or_else(|_| unreachable!("many0 never fails"));
+
+    let trailing = remaining.trim();
+    if !trailing.is_empty() {
+        if trailing.starts_with(|c: char| c.is_ascii_digit() || c == 'd' || c == 'D' || c == '(') {
+            return Err(ParseError::MissingOperator);
+        }
+        return Err(ParseError::UnexpectedTrailing {
+            rest: trailing.to_owned(),
+        });
+    }
+
+    let mut terms = Vec::with_capacity(1 + rest_raw.len());
+    terms.push(validate_atom(sign_ch.map_or(1, sign_to_i64), first_raw)?);
+    for (sign_ch, raw) in rest_raw {
+        terms.push(validate_atom(sign_to_i64(sign_ch), raw)?);
+    }
+
+    Ok(terms)
 }
 
 /// Parses a dice expression into a list of `(sign, Term)` pairs.
@@ -141,6 +272,9 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
 /// Signs are `1` or `-1`. Whitespace is ignored. The leading sign of the
 /// first term is always explicit in the result (`+` → `1`, `-` → `-1`,
 /// absent → `1`).
+///
+/// Parenthesised sub-expressions may be scaled with a `*N` suffix.
+/// Nesting is supported.
 ///
 /// # Errors
 ///
@@ -161,6 +295,9 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
 /// let terms = parse("4d6 - 1").unwrap();
 /// assert_eq!(terms[1], (-1, Term::Const(1)));
 ///
+/// let terms = parse("(2d6+3)*2").unwrap();
+/// assert!(matches!(&terms[0], (1, Term::Group { multiplier: 2, .. })));
+///
 /// assert!(parse("").is_err());
 /// assert!(parse("0d6").is_err());
 /// ```
@@ -169,33 +306,7 @@ pub fn parse(input: &str) -> Result<Vec<(i64, Term)>, ParseError> {
     if trimmed.is_empty() {
         return Err(ParseError::Empty);
     }
-
-    let (remaining, (sign_ch, first_raw)) =
-        parse_first_term(trimmed).map_err(|_| ParseError::Unexpected {
-            token: trimmed.to_owned(),
-        })?;
-
-    let (remaining, rest_raw) = many0(parse_subsequent_term)
-        .parse(remaining)
-        .unwrap_or_else(|_| unreachable!("many0 never fails"));
-
-    let trailing = remaining.trim();
-    if !trailing.is_empty() {
-        if trailing.starts_with(|c: char| c.is_ascii_digit() || c == 'd' || c == 'D') {
-            return Err(ParseError::MissingOperator);
-        }
-        return Err(ParseError::UnexpectedTrailing {
-            rest: trailing.to_owned(),
-        });
-    }
-
-    let mut terms = Vec::with_capacity(1 + rest_raw.len());
-    terms.push(validate_atom(sign_ch.map_or(1, sign_to_i64), first_raw)?);
-    for (sign_ch, raw) in rest_raw {
-        terms.push(validate_atom(sign_to_i64(sign_ch), raw)?);
-    }
-
-    Ok(terms)
+    parse_nonempty(trimmed)
 }
 
 #[cfg(test)]
@@ -205,6 +316,10 @@ mod tests {
 
     fn dice(count: u64, sides: u64) -> Term {
         Term::Dice { count, sides }
+    }
+
+    fn group(terms: Vec<(i64, Term)>, multiplier: u64) -> Term {
+        Term::Group { terms, multiplier }
     }
 
     #[test]
@@ -264,6 +379,87 @@ mod tests {
     }
 
     #[test]
+    fn parse_group_with_multiplier() {
+        assert_eq!(
+            parse("(2d6+3)*2").unwrap(),
+            vec![(1, group(vec![(1, dice(2, 6)), (1, Term::Const(3))], 2))],
+        );
+    }
+
+    #[test]
+    fn parse_group_no_multiplier() {
+        assert_eq!(
+            parse("(d6)").unwrap(),
+            vec![(1, group(vec![(1, dice(1, 6))], 1))],
+        );
+    }
+
+    #[test]
+    fn parse_full_expression_with_group() {
+        let terms = parse("d20 + (2d6+3)*2 + 5").unwrap();
+        assert_eq!(terms.len(), 3);
+        assert_eq!(terms[0], (1, dice(1, 20)));
+        assert_eq!(
+            terms[1],
+            (1, group(vec![(1, dice(2, 6)), (1, Term::Const(3))], 2))
+        );
+        assert_eq!(terms[2], (1, Term::Const(5)));
+    }
+
+    #[test]
+    fn parse_group_with_whitespace() {
+        assert_eq!(
+            parse("( 2d6 + 3 ) * 2").unwrap(),
+            parse("(2d6+3)*2").unwrap(),
+        );
+    }
+
+    #[test]
+    fn parse_group_prefix_multiplier() {
+        assert_eq!(parse("2*(2d6+3)").unwrap(), parse("(2d6+3)*2").unwrap());
+    }
+
+    #[test]
+    fn parse_group_prefix_with_whitespace() {
+        assert_eq!(parse("2 * (2d6+3)").unwrap(), parse("(2d6+3)*2").unwrap());
+    }
+
+    #[test]
+    fn parse_rejects_both_prefix_and_suffix_multiplier() {
+        assert!(parse("2*(2d6+3)*3").is_err());
+    }
+
+    #[test]
+    fn parse_group_negative_sign() {
+        assert_eq!(
+            parse("-(2d6+3)*2").unwrap(),
+            vec![(-1, group(vec![(1, dice(2, 6)), (1, Term::Const(3))], 2))],
+        );
+    }
+
+    #[test]
+    fn parse_nested_groups() {
+        let terms = parse("((d6+1)*2+3)*4").unwrap();
+        assert_eq!(terms.len(), 1);
+        let (sign, outer) = &terms[0];
+        assert_eq!(*sign, 1);
+        if let Term::Group {
+            terms: outer_inner,
+            multiplier: 4,
+        } = outer
+        {
+            assert_eq!(outer_inner.len(), 2);
+            assert_eq!(
+                outer_inner[0],
+                (1, group(vec![(1, dice(1, 6)), (1, Term::Const(1))], 2))
+            );
+            assert_eq!(outer_inner[1], (1, Term::Const(3)));
+        } else {
+            panic!("expected outer Group with multiplier 4");
+        }
+    }
+
+    #[test]
     fn parse_rejects_empty() {
         assert!(parse("").is_err());
         assert!(parse("   ").is_err());
@@ -306,6 +502,23 @@ mod tests {
     fn parse_rejects_excessive_dice_count() {
         assert!(parse(&format!("{}d6", MAX_DICE_COUNT + 1)).is_err());
         assert!(parse(&format!("{}d6", MAX_DICE_COUNT)).is_ok());
+    }
+
+    #[test]
+    fn parse_rejects_unmatched_paren() {
+        assert!(parse("(2d6+3").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_empty_group() {
+        assert!(parse("()*2").is_err());
+        assert!(parse("()").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_missing_operator_with_group() {
+        assert!(parse("2d6 (d4)").is_err());
+        assert!(parse("(2d6+3) (d4+1)").is_err());
     }
 
     // Typed variant tests — pin the exact error for each failure mode.
