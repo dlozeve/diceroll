@@ -59,6 +59,12 @@ impl std::fmt::Display for KeepDrop {
     }
 }
 
+impl serde::Serialize for KeepDrop {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Term {
     Dice {

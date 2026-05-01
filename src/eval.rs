@@ -4,30 +4,35 @@ use rand::Rng;
 
 use crate::parser::{KeepDrop, ParseError, Term, parse};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EvalResult {
     pub total: i64,
     pub terms: Vec<EvalTerm>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EvalTerm {
     pub sign: i64,
+    #[serde(flatten)]
     pub kind: EvalTermKind,
     pub subtotal: i64,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
 pub enum EvalTermKind {
     Dice {
         count: u64,
         sides: u64,
+        #[serde(rename = "modifier", skip_serializing_if = "Option::is_none")]
         keep_drop: Option<KeepDrop>,
         rolls: Vec<u64>,
         /// Parallel to `rolls`; `false` means the die was dropped.
         kept: Vec<bool>,
     },
-    Const(u64),
+    Const {
+        value: u64,
+    },
     Group {
         terms: Vec<EvalTerm>,
         multiplier: u64,
@@ -120,7 +125,7 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                     sign * sum as i64,
                 )
             }
-            Term::Const(n) => (EvalTermKind::Const(*n), sign * *n as i64),
+            Term::Const(n) => (EvalTermKind::Const { value: *n }, sign * *n as i64),
             Term::Group {
                 terms: inner_terms,
                 multiplier,
@@ -186,7 +191,7 @@ fn format_terms(terms: &[EvalTerm]) -> String {
                 }
                 out.push(']');
             }
-            EvalTermKind::Const(n) => {
+            EvalTermKind::Const { value: n } => {
                 let _ = write!(out, "{n}");
             }
             EvalTermKind::Group {
@@ -203,66 +208,6 @@ fn format_terms(terms: &[EvalTerm]) -> String {
         }
     }
     out
-}
-
-fn write_term_json(out: &mut String, term: &EvalTerm) {
-    match &term.kind {
-        EvalTermKind::Dice {
-            count,
-            sides,
-            keep_drop,
-            rolls,
-            kept,
-        } => {
-            let _ = write!(
-                out,
-                "{{\"kind\":\"dice\",\"sign\":{},\"count\":{count},\"sides\":{sides},",
-                term.sign
-            );
-            if let Some(kd) = keep_drop {
-                let _ = write!(out, "\"modifier\":\"{kd}\",");
-            }
-            out.push_str("\"rolls\":[");
-            for (j, r) in rolls.iter().enumerate() {
-                if j > 0 {
-                    out.push(',');
-                }
-                let _ = write!(out, "{r}");
-            }
-            out.push_str("],\"kept\":[");
-            for (j, &k) in kept.iter().enumerate() {
-                if j > 0 {
-                    out.push(',');
-                }
-                out.push_str(if k { "true" } else { "false" });
-            }
-            let _ = write!(out, "],\"subtotal\":{}}}", term.subtotal);
-        }
-        EvalTermKind::Const(n) => {
-            let _ = write!(
-                out,
-                "{{\"kind\":\"const\",\"sign\":{},\"value\":{n},\"subtotal\":{}}}",
-                term.sign, term.subtotal,
-            );
-        }
-        EvalTermKind::Group {
-            terms: inner_terms,
-            multiplier,
-        } => {
-            let _ = write!(
-                out,
-                "{{\"kind\":\"group\",\"sign\":{},\"multiplier\":{multiplier},\"subtotal\":{},\"terms\":[",
-                term.sign, term.subtotal
-            );
-            for (j, t) in inner_terms.iter().enumerate() {
-                if j > 0 {
-                    out.push(',');
-                }
-                write_term_json(out, t);
-            }
-            out.push_str("]}");
-        }
-    }
 }
 
 impl EvalResult {
@@ -284,16 +229,8 @@ impl EvalResult {
     }
 
     pub fn json(&self) -> String {
-        let mut out = String::new();
-        let _ = write!(out, "{{\"total\":{},\"terms\":[", self.total);
-        for (i, term) in self.terms.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            write_term_json(&mut out, term);
-        }
-        out.push_str("]}");
-        out
+        #[allow(clippy::expect_used)]
+        serde_json::to_string(self).expect("infallible: no floats, no non-string map keys")
     }
 
     /// Returns the plain display string (`"<breakdown> = <total>"`) or JSON.
@@ -516,7 +453,7 @@ mod tests {
         let r = run("3+4-1", &mut rng).unwrap();
         assert_eq!(
             r.json(),
-            r#"{"total":6,"terms":[{"kind":"const","sign":1,"value":3,"subtotal":3},{"kind":"const","sign":1,"value":4,"subtotal":4},{"kind":"const","sign":-1,"value":1,"subtotal":-1}]}"#
+            r#"{"total":6,"terms":[{"sign":1,"kind":"const","value":3,"subtotal":3},{"sign":1,"kind":"const","value":4,"subtotal":4},{"sign":-1,"kind":"const","value":1,"subtotal":-1}]}"#
         );
     }
 
