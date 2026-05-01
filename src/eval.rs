@@ -22,8 +22,12 @@ pub enum EvalTermKind {
     Dice {
         count: u64,
         sides: u64,
-        #[serde(rename = "modifier", skip_serializing_if = "Option::is_none")]
-        modifier: Option<DiceModifier>,
+        #[serde(
+            rename = "modifier",
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "crate::parser::serialize_dice_modifiers"
+        )]
+        modifier: Option<Vec<DiceModifier>>,
         rolls: Vec<u64>,
         /// Parallel to `rolls`; `false` means the die was dropped.
         kept: Vec<bool>,
@@ -103,20 +107,29 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                 let count = *count;
                 let sides = *sides;
                 let mut rolls: Vec<u64> = Vec::with_capacity(count as usize);
+                let mut kept = vec![true; count as usize];
                 for _ in 0..count {
-                    let roll = rng.random_range(1..=sides);
-                    let clamped = match modifier {
-                        Some(DiceModifier::Min(min)) => roll.max(*min),
-                        Some(DiceModifier::Max(max)) => roll.min(*max),
-                        _ => roll,
-                    };
-                    rolls.push(clamped);
+                    rolls.push(rng.random_range(1..=sides));
                 }
-                let keep_drop = modifier.as_ref().and_then(|m| match m {
-                    DiceModifier::KeepDrop(kd) => Some(kd),
-                    _ => None,
-                });
-                let kept = apply_keep_drop(keep_drop, &rolls);
+                if let Some(modifiers) = modifier {
+                    for modifier in modifiers {
+                        match modifier {
+                            DiceModifier::Min(min) => {
+                                for roll in &mut rolls {
+                                    *roll = (*roll).max(*min);
+                                }
+                            }
+                            DiceModifier::Max(max) => {
+                                for roll in &mut rolls {
+                                    *roll = (*roll).min(*max);
+                                }
+                            }
+                            DiceModifier::KeepDrop(kd) => {
+                                kept = apply_keep_drop(Some(kd), &rolls);
+                            }
+                        }
+                    }
+                }
                 let sum: u64 = rolls
                     .iter()
                     .zip(kept.iter())
@@ -267,6 +280,25 @@ mod tests {
             assert!(rolls.iter().all(|&r| r <= 4));
             assert!(kept.iter().all(|&k| k));
             assert!((4..=16).contains(&r.total));
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_combined_modifiers_apply_in_order() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4d6min3kl4", &mut rng).unwrap();
+        if let EvalTermKind::Dice {
+            modifier,
+            rolls,
+            kept,
+            ..
+        } = &r.terms[0].kind
+        {
+            assert!(matches!(modifier.as_ref().map(|mods| mods.len()), Some(2)));
+            assert!(rolls.iter().all(|&r| r >= 3));
+            assert_eq!(kept.iter().filter(|&&k| k).count(), 4);
         } else {
             panic!("expected Dice term");
         }

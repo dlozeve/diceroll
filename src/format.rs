@@ -36,8 +36,10 @@ fn format_terms(terms: &[EvalTerm], color: bool) -> String {
                 kept,
             } => {
                 let _ = write!(out, "{count}d{sides}");
-                if let Some(modifier) = modifier {
-                    let _ = write!(out, "{modifier}");
+                if let Some(modifiers) = modifier {
+                    for modifier in modifiers {
+                        let _ = write!(out, "{modifier}");
+                    }
                 }
                 out.push('[');
                 for (i, (r, &k)) in rolls.iter().zip(kept.iter()).enumerate() {
@@ -184,6 +186,14 @@ mod tests {
     }
 
     #[test]
+    fn display_combined_modifiers_concatenates_them() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6min3kl4", &mut rng).unwrap();
+        let d = r.display(false);
+        assert!(d.starts_with("4d6min3kl4["), "got: {d}");
+    }
+
+    #[test]
     fn display_group() {
         let mut rng = StdRng::seed_from_u64(0);
         let r = run("(2d6+3)*2", &mut rng).unwrap();
@@ -273,6 +283,14 @@ mod tests {
         let json = r.json();
         assert!(json.contains(r#""modifier":"min3""#));
         assert!(json.contains(r#""rolls":["#));
+    }
+
+    #[test]
+    fn json_output_for_dice_with_combined_modifiers_is_array() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let r = run("4d6min3kl4", &mut rng).unwrap();
+        let json = r.json();
+        assert!(json.contains(r#""modifier":["min3","kl4"]"#), "got: {json}");
     }
 
     #[test]

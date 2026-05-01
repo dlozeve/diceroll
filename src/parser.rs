@@ -89,12 +89,26 @@ impl serde::Serialize for DiceModifier {
     }
 }
 
+pub(crate) fn serialize_dice_modifiers<S>(
+    modifiers: &Option<Vec<DiceModifier>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match modifiers {
+        None => serializer.serialize_none(),
+        Some(modifiers) if modifiers.len() == 1 => serializer.collect_str(&modifiers[0]),
+        Some(modifiers) => serde::Serialize::serialize(modifiers, serializer),
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Term {
     Dice {
         count: u64,
         sides: u64,
-        modifier: Option<DiceModifier>,
+        modifier: Option<Vec<DiceModifier>>,
     },
     Const(u64),
     /// A parenthesised sub-expression with an optional integer multiplier.
@@ -113,7 +127,7 @@ enum RawAtom<'a> {
     Dice {
         count_str: &'a str,
         sides_str: &'a str,
-        modifier: Option<RawDiceModifier<'a>>,
+        modifiers: Vec<RawDiceModifier<'a>>,
     },
     Const(&'a str),
     Group {
@@ -161,13 +175,13 @@ fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
     let (input, count_str) = digit0(input)?;
     let (input, _) = one_of("dD").parse(input)?;
     let (input, sides_str) = alt((tag("%"), digit1)).parse(input)?;
-    let (input, modifier) = opt(parse_dice_modifier).parse(input)?;
+    let (input, modifiers) = many0(parse_dice_modifier).parse(input)?;
     Ok((
         input,
         RawAtom::Dice {
             count_str,
             sides_str,
-            modifier,
+            modifiers,
         },
     ))
 }
@@ -272,7 +286,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
         RawAtom::Dice {
             count_str,
             sides_str,
-            modifier,
+            modifiers,
         } => {
             let count: u64 = if count_str.is_empty() {
                 1
@@ -300,29 +314,40 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
             if sides < 2 {
                 return Err(ParseError::TooFewSides);
             }
-            let modifier = match modifier {
-                None => None,
-                Some(RawDiceModifier::KeepDrop(ctor, s)) => {
-                    let n: u64 = s
-                        .parse()
-                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
-                    if n > count {
-                        return Err(ParseError::ModifierExceedsDiceCount { count, modifier: n });
+            let mut parsed_modifiers = Vec::with_capacity(modifiers.len());
+            for modifier in modifiers {
+                let parsed = match modifier {
+                    RawDiceModifier::KeepDrop(ctor, s) => {
+                        let n: u64 = s
+                            .parse()
+                            .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                        if n > count {
+                            return Err(ParseError::ModifierExceedsDiceCount {
+                                count,
+                                modifier: n,
+                            });
+                        }
+                        DiceModifier::KeepDrop(ctor(n))
                     }
-                    Some(DiceModifier::KeepDrop(ctor(n)))
-                }
-                Some(RawDiceModifier::Min(s)) => {
-                    let n: u64 = s
-                        .parse()
-                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
-                    Some(DiceModifier::Min(n))
-                }
-                Some(RawDiceModifier::Max(s)) => {
-                    let n: u64 = s
-                        .parse()
-                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
-                    Some(DiceModifier::Max(n))
-                }
+                    RawDiceModifier::Min(s) => {
+                        let n: u64 = s
+                            .parse()
+                            .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                        DiceModifier::Min(n)
+                    }
+                    RawDiceModifier::Max(s) => {
+                        let n: u64 = s
+                            .parse()
+                            .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                        DiceModifier::Max(n)
+                    }
+                };
+                parsed_modifiers.push(parsed);
+            }
+            let modifier = if parsed_modifiers.is_empty() {
+                None
+            } else {
+                Some(parsed_modifiers)
             };
             Ok((
                 sign,
@@ -447,7 +472,7 @@ mod tests {
         Term::Dice {
             count,
             sides,
-            modifier: Some(DiceModifier::KeepDrop(keep_drop)),
+            modifier: Some(vec![DiceModifier::KeepDrop(keep_drop)]),
         }
     }
 
@@ -455,7 +480,15 @@ mod tests {
         Term::Dice {
             count,
             sides,
-            modifier: Some(modifier),
+            modifier: Some(vec![modifier]),
+        }
+    }
+
+    fn dice_mods(count: u64, sides: u64, modifiers: Vec<DiceModifier>) -> Term {
+        Term::Dice {
+            count,
+            sides,
+            modifier: Some(modifiers),
         }
     }
 
@@ -547,6 +580,24 @@ mod tests {
         assert_eq!(
             parse("4d6max4").unwrap(),
             vec![(1, dice_mod(4, 6, DiceModifier::Max(4)))],
+        );
+    }
+
+    #[test]
+    fn parse_combined_modifiers() {
+        assert_eq!(
+            parse("4d6min3kl4").unwrap(),
+            vec![(
+                1,
+                dice_mods(
+                    4,
+                    6,
+                    vec![
+                        DiceModifier::Min(3),
+                        DiceModifier::KeepDrop(KeepDrop::KeepLowest(4))
+                    ]
+                )
+            )],
         );
     }
 
