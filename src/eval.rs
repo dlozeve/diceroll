@@ -1,6 +1,7 @@
 use rand::Rng;
 
-use crate::parser::{DiceModifier, DiceSides, KeepDrop, ParseError, Term, parse};
+use crate::model::{DiceModifier, DiceSides, KeepDrop, Term};
+use crate::parser::{ParseError, parse};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EvalResult {
@@ -25,7 +26,7 @@ pub enum EvalTermKind {
         #[serde(
             rename = "modifier",
             skip_serializing_if = "Option::is_none",
-            serialize_with = "crate::parser::serialize_dice_modifiers"
+            serialize_with = "crate::model::serialize_dice_modifiers"
         )]
         modifier: Option<Vec<DiceModifier>>,
         rolls: Vec<i64>,

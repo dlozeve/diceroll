@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::eval::{EvalResult, EvalTerm, EvalTermKind};
-use crate::parser::DiceSides;
+use crate::model::DiceSides;
 
 const ANSI_RED: &str = "\x1b[31m";
 const ANSI_GREEN: &str = "\x1b[32m";
