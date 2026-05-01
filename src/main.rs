@@ -18,7 +18,7 @@ use repl::{read_stdin, repl};
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Run,
-    Serve,
+    Serve { port: u16 },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,8 +48,8 @@ fn main() {
 
 fn run_mode<R: Rng>(args: Args, rng: &mut R) {
     match args.command {
-        Command::Serve => {
-            if let Err(e) = server::serve(rng) {
+        Command::Serve { port } => {
+            if let Err(e) = server::serve(rng, port) {
                 eprintln!("server error: {e}");
                 process::exit(1);
             }
@@ -94,12 +94,14 @@ where
     let mut no_color = false;
     let mut parts: Vec<String> = Vec::new();
     let mut command = Command::Run;
+    let mut serve_port: Option<u16> = None;
 
     while let Some(arg) = parser.next()? {
         match arg {
             Long("seed") => seed = Some(parser.value()?.parse()?),
             Long("json") => json = true,
             Long("no-color") => no_color = true,
+            Long("port") => serve_port = Some(parser.value()?.parse()?),
             Short('h') | Long("help") => {
                 print_help();
                 process::exit(0);
@@ -107,8 +109,10 @@ where
             Value(v) => {
                 let value = v.string()?;
                 if command == Command::Run && parts.is_empty() && value == "serve" {
-                    command = Command::Serve;
-                } else if command == Command::Serve {
+                    command = Command::Serve {
+                        port: serve_port.take().unwrap_or(8000),
+                    };
+                } else if matches!(command, Command::Serve { .. }) {
                     return Err(lexopt::Error::UnexpectedArgument(value.into()));
                 } else {
                     parts.push(value);
@@ -123,6 +127,17 @@ where
     } else {
         Some(parts.join(" "))
     };
+    let command = match command {
+        Command::Run => {
+            if serve_port.is_some() {
+                return Err(lexopt::Error::UnexpectedArgument("--port".into()));
+            }
+            Command::Run
+        }
+        Command::Serve { port } => Command::Serve {
+            port: serve_port.unwrap_or(port),
+        },
+    };
     Ok(Args {
         seed,
         json,
@@ -133,17 +148,20 @@ where
 }
 
 const HELP: &str = "\
-Usage: diceroll [--seed N] [--json] [--no-color] [EXPR ...]
-       diceroll serve
+Usage: diceroll [--seed N] [--json] [--no-color] [EXPR]
+       diceroll serve [--port N]
 
 Options:
   --seed N      seed the RNG for reproducible rolls
   --json        output structured JSON
   --no-color    disable ANSI color output (also honoured via NO_COLOR env var)
+  --port N      port for `serve` (default: 8000)
   -h, --help    show this help
 
 Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
-`diceroll serve` exposes a local HTTP server on 127.0.0.1:8000 with GET /roll?q=...
+
+`diceroll serve` exposes a local HTTP server on 127.0.0.1:N with GET /roll?q=... and POST /roll
+
 For an expression starting with '-', use '--' (e.g. diceroll -- -1d4+10).";
 
 fn print_help() {
@@ -294,7 +312,24 @@ mod tests {
     #[test]
     fn serve_subcommand_sets_command() {
         let a = parse(&["serve"]);
-        assert_eq!(a.command, Command::Serve);
+        assert_eq!(a.command, Command::Serve { port: 8000 });
         assert!(a.expr.is_none());
+    }
+
+    #[test]
+    fn serve_subcommand_accepts_port_before() {
+        let a = parse(&["--port", "8123", "serve"]);
+        assert_eq!(a.command, Command::Serve { port: 8123 });
+    }
+
+    #[test]
+    fn serve_subcommand_accepts_port_after() {
+        let a = parse(&["serve", "--port", "8123"]);
+        assert_eq!(a.command, Command::Serve { port: 8123 });
+    }
+
+    #[test]
+    fn port_without_serve_errors() {
+        parse_err(&["--port", "8123"]);
     }
 }

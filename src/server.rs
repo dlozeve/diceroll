@@ -6,10 +6,9 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use diceroll::run;
 
-const DEFAULT_ADDR: &str = "127.0.0.1:8000";
-
-pub fn serve<R: Rng>(rng: &mut R) -> io::Result<()> {
-    let server = Server::http(DEFAULT_ADDR).map_err(|err| io::Error::other(err.to_string()))?;
+pub fn serve<R: Rng>(rng: &mut R, port: u16) -> io::Result<()> {
+    let addr = format!("127.0.0.1:{port}");
+    let server = Server::http(addr).map_err(|err| io::Error::other(err.to_string()))?;
     for request in server.incoming_requests() {
         handle_request(request, rng);
     }
@@ -21,7 +20,10 @@ fn handle_request<R: Rng>(mut request: Request, rng: &mut R) {
     let _ = request.respond(response);
 }
 
-fn build_response<R: Rng>(request: &mut Request, rng: &mut R) -> Response<std::io::Cursor<Vec<u8>>> {
+fn build_response<R: Rng>(
+    request: &mut Request,
+    rng: &mut R,
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let wants_json = wants_json(request);
     let (path, query) = split_path_and_query(request.url());
 

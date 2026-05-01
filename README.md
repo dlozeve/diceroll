@@ -76,7 +76,7 @@ $ diceroll --seed 42 10d20
 Local HTTP server:
 
 ```bash
-$ diceroll serve
+$ diceroll serve --port 8000
 $ curl 'http://127.0.0.1:8000/roll?q=2d6%2B3'
 2d6[4,1] + 3 = 8
 $ curl -X POST --data '2d6+3' http://127.0.0.1:8000/roll
@@ -92,6 +92,7 @@ The server exposes two endpoints:
 - Plain text is returned by default
 - Send `Accept: application/json` for JSON
 - Encode arithmetic `+` as `%2B` in the query string, or use `curl --get --data-urlencode 'q=2d6+3'`
+- The default port is `8000` and can be configured with the `--port` argument
 
 ## License
 
