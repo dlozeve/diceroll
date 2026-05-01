@@ -17,4 +17,4 @@ pub mod format;
 pub mod parser;
 
 pub use eval::{EvalResult, EvalTerm, EvalTermKind, evaluate, run};
-pub use parser::{KeepDrop, ParseError, Term, parse};
+pub use parser::{DiceModifier, KeepDrop, ParseError, Term, parse};

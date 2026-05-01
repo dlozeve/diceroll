@@ -29,6 +29,7 @@ Roll any dice combination from the command line!
 - Combine several dice by adding or subtracting them, along with constants: `3d6 - 2`
 - Multipliers and grouping: `d20 + (2d6+3)*2 + 5`
 - Keep/drop highest/lowest: `6d4dl2` drops the 2 lowest dice, `2d20kh1` keeps the highest (advantage), `2d20kl1` keeps the lowest (disadvantage)
+- Clamp dice results with minimum/maximum values: `4d6min3` treats any die below 3 as 3, `4d6max4` caps any die above 4 at 4
 
 ## Usage
 
@@ -40,6 +41,8 @@ $ diceroll
 4d6[1,1,4,1] + 2 = 9
 >>> 2d20kh1
 2d20kh1[{1},5] = 5
+>>> 4d6min3
+4d6min3[5,5,3,4] = 17
 ```
 
 JSON output:

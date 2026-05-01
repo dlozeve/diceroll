@@ -31,13 +31,13 @@ fn format_terms(terms: &[EvalTerm], color: bool) -> String {
             EvalTermKind::Dice {
                 count,
                 sides,
-                keep_drop,
+                modifier,
                 rolls,
                 kept,
             } => {
                 let _ = write!(out, "{count}d{sides}");
-                if let Some(kd) = keep_drop {
-                    let _ = write!(out, "{kd}");
+                if let Some(modifier) = modifier {
+                    let _ = write!(out, "{modifier}");
                 }
                 out.push('[');
                 for (i, (r, &k)) in rolls.iter().zip(kept.iter()).enumerate() {
@@ -166,6 +166,24 @@ mod tests {
     }
 
     #[test]
+    fn display_min_shows_modifier() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6min3", &mut rng).unwrap();
+        let d = r.display(false);
+        assert!(d.starts_with("4d6min3["), "got: {d}");
+        assert!(!d.contains('{'));
+    }
+
+    #[test]
+    fn display_max_shows_modifier() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4d6max4", &mut rng).unwrap();
+        let d = r.display(false);
+        assert!(d.starts_with("4d6max4["), "got: {d}");
+        assert!(!d.contains('{'));
+    }
+
+    #[test]
     fn display_group() {
         let mut rng = StdRng::seed_from_u64(0);
         let r = run("(2d6+3)*2", &mut rng).unwrap();
@@ -246,6 +264,15 @@ mod tests {
         assert!(json.contains(r#""kept":["#));
         // one false in the kept array
         assert!(json.contains("false"));
+    }
+
+    #[test]
+    fn json_output_for_dice_with_min_modifier_has_modifier_field() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let r = run("4d6min3", &mut rng).unwrap();
+        let json = r.json();
+        assert!(json.contains(r#""modifier":"min3""#));
+        assert!(json.contains(r#""rolls":["#));
     }
 
     #[test]

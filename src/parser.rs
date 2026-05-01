@@ -39,6 +39,14 @@ pub enum ParseError {
     InvalidNumber(String),
 }
 
+/// A modifier applied to a dice roll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiceModifier {
+    KeepDrop(KeepDrop),
+    Min(u64),
+    Max(u64),
+}
+
 /// A keep/drop modifier applied to a dice roll.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeepDrop {
@@ -59,7 +67,23 @@ impl std::fmt::Display for KeepDrop {
     }
 }
 
+impl std::fmt::Display for DiceModifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiceModifier::KeepDrop(kd) => write!(f, "{kd}"),
+            DiceModifier::Min(n) => write!(f, "min{n}"),
+            DiceModifier::Max(n) => write!(f, "max{n}"),
+        }
+    }
+}
+
 impl serde::Serialize for KeepDrop {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl serde::Serialize for DiceModifier {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
     }
@@ -70,7 +94,7 @@ pub enum Term {
     Dice {
         count: u64,
         sides: u64,
-        keep_drop: Option<KeepDrop>,
+        modifier: Option<DiceModifier>,
     },
     Const(u64),
     /// A parenthesised sub-expression with an optional integer multiplier.
@@ -89,13 +113,19 @@ enum RawAtom<'a> {
     Dice {
         count_str: &'a str,
         sides_str: &'a str,
-        modifier: Option<(KeepDropCtor, &'a str)>,
+        modifier: Option<RawDiceModifier<'a>>,
     },
     Const(&'a str),
     Group {
         inner: &'a str,
         multiplier_str: Option<&'a str>,
     },
+}
+
+enum RawDiceModifier<'a> {
+    KeepDrop(KeepDropCtor, &'a str),
+    Min(&'a str),
+    Max(&'a str),
 }
 
 fn sign_to_i64(c: char) -> i64 {
@@ -106,16 +136,25 @@ fn parse_sign(input: &str) -> IResult<&str, char> {
     one_of("+-").parse(input)
 }
 
-fn parse_dice_modifier(input: &str) -> IResult<&str, (KeepDropCtor, &str)> {
-    let (input, ctor) = alt((
+fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
+    let parse_keep_drop = alt((
         tag("kh").map(|_| KeepDrop::KeepHighest as KeepDropCtor),
         tag("kl").map(|_| KeepDrop::KeepLowest as KeepDropCtor),
         tag("dh").map(|_| KeepDrop::DropHighest as KeepDropCtor),
         tag("dl").map(|_| KeepDrop::DropLowest as KeepDropCtor),
-    ))
-    .parse(input)?;
-    let (input, count_str) = digit1(input)?;
-    Ok((input, (ctor, count_str)))
+    ));
+
+    let parse_keep_drop = parse_keep_drop
+        .and(digit1)
+        .map(|(ctor, count_str)| RawDiceModifier::KeepDrop(ctor, count_str));
+    let parse_min = tag("min")
+        .and(digit1)
+        .map(|(_, count_str)| RawDiceModifier::Min(count_str));
+    let parse_max = tag("max")
+        .and(digit1)
+        .map(|(_, count_str)| RawDiceModifier::Max(count_str));
+
+    alt((parse_keep_drop, parse_min, parse_max)).parse(input)
 }
 
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
@@ -261,16 +300,28 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
             if sides < 2 {
                 return Err(ParseError::TooFewSides);
             }
-            let keep_drop = match modifier {
+            let modifier = match modifier {
                 None => None,
-                Some((ctor, s)) => {
+                Some(RawDiceModifier::KeepDrop(ctor, s)) => {
                     let n: u64 = s
                         .parse()
                         .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
                     if n > count {
                         return Err(ParseError::ModifierExceedsDiceCount { count, modifier: n });
                     }
-                    Some(ctor(n))
+                    Some(DiceModifier::KeepDrop(ctor(n)))
+                }
+                Some(RawDiceModifier::Min(s)) => {
+                    let n: u64 = s
+                        .parse()
+                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                    Some(DiceModifier::Min(n))
+                }
+                Some(RawDiceModifier::Max(s)) => {
+                    let n: u64 = s
+                        .parse()
+                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                    Some(DiceModifier::Max(n))
                 }
             };
             Ok((
@@ -278,7 +329,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                 Term::Dice {
                     count,
                     sides,
-                    keep_drop,
+                    modifier,
                 },
             ))
         }
@@ -358,7 +409,7 @@ fn parse_nonempty(trimmed: &str) -> Result<Vec<(i64, Term)>, ParseError> {
 ///
 /// let terms = parse("2d6+3").unwrap();
 /// assert_eq!(terms, vec![
-///     (1,  Term::Dice { count: 2, sides: 6, keep_drop: None }),
+///     (1,  Term::Dice { count: 2, sides: 6, modifier: None }),
 ///     (1,  Term::Const(3)),
 /// ]);
 ///
@@ -388,7 +439,7 @@ mod tests {
         Term::Dice {
             count,
             sides,
-            keep_drop: None,
+            modifier: None,
         }
     }
 
@@ -396,7 +447,15 @@ mod tests {
         Term::Dice {
             count,
             sides,
-            keep_drop: Some(keep_drop),
+            modifier: Some(DiceModifier::KeepDrop(keep_drop)),
+        }
+    }
+
+    fn dice_mod(count: u64, sides: u64, modifier: DiceModifier) -> Term {
+        Term::Dice {
+            count,
+            sides,
+            modifier: Some(modifier),
         }
     }
 
@@ -472,6 +531,22 @@ mod tests {
         assert_eq!(
             parse("d%kh1").unwrap(),
             vec![(1, dice_kd(1, 100, KeepDrop::KeepHighest(1)))],
+        );
+    }
+
+    #[test]
+    fn parse_min_modifier() {
+        assert_eq!(
+            parse("4d6min3").unwrap(),
+            vec![(1, dice_mod(4, 6, DiceModifier::Min(3)))],
+        );
+    }
+
+    #[test]
+    fn parse_max_modifier() {
+        assert_eq!(
+            parse("4d6max4").unwrap(),
+            vec![(1, dice_mod(4, 6, DiceModifier::Max(4)))],
         );
     }
 
