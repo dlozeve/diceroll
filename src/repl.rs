@@ -10,6 +10,7 @@ fn handle_line(
     line: &str,
     rng: &mut impl Rng,
     json: bool,
+    color: bool,
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> io::Result<bool> {
@@ -18,23 +19,23 @@ fn handle_line(
         return Ok(false);
     }
     match run(expr, rng) {
-        Ok(r) => writeln!(out, "{}", r.formatted(json))?,
+        Ok(r) => writeln!(out, "{}", r.formatted(json, color))?,
         Err(e) => writeln!(err, "parse error: {e}")?,
     }
     Ok(true)
 }
 
-pub fn read_stdin(rng: &mut impl Rng, json: bool) -> io::Result<()> {
+pub fn read_stdin(rng: &mut impl Rng, json: bool, color: bool) -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
     for line in stdin.lock().lines() {
-        handle_line(&line?, rng, json, &mut stdout, &mut stderr)?;
+        handle_line(&line?, rng, json, color, &mut stdout, &mut stderr)?;
     }
     Ok(())
 }
 
-pub fn repl(rng: &mut impl Rng, json: bool) -> rustyline::Result<()> {
+pub fn repl(rng: &mut impl Rng, json: bool, color: bool) -> rustyline::Result<()> {
     let mut rl = DefaultEditor::new()?;
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
@@ -42,7 +43,7 @@ pub fn repl(rng: &mut impl Rng, json: bool) -> rustyline::Result<()> {
     loop {
         match rl.readline(">>> ") {
             Ok(line) => {
-                if handle_line(&line, rng, json, &mut stdout, &mut stderr)? {
+                if handle_line(&line, rng, json, color, &mut stdout, &mut stderr)? {
                     rl.add_history_entry(line.trim())?;
                 }
             }
@@ -63,7 +64,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(7);
         let mut out: Vec<u8> = Vec::new();
         let mut err: Vec<u8> = Vec::new();
-        let added = handle_line("2d6+1", &mut rng, false, &mut out, &mut err).unwrap();
+        let added = handle_line("2d6+1", &mut rng, false, false, &mut out, &mut err).unwrap();
 
         let mut expected_rng = StdRng::seed_from_u64(7);
         let r = run("2d6+1", &mut expected_rng).unwrap();
@@ -71,7 +72,7 @@ mod tests {
         assert!(added);
         assert_eq!(
             String::from_utf8(out).unwrap(),
-            format!("{}\n", r.formatted(false))
+            format!("{}\n", r.formatted(false, false))
         );
         assert!(err.is_empty());
     }
@@ -81,14 +82,14 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(7);
         let mut out: Vec<u8> = Vec::new();
         let mut err: Vec<u8> = Vec::new();
-        handle_line("2d6+1", &mut rng, true, &mut out, &mut err).unwrap();
+        handle_line("2d6+1", &mut rng, true, false, &mut out, &mut err).unwrap();
 
         let mut expected_rng = StdRng::seed_from_u64(7);
         let r = run("2d6+1", &mut expected_rng).unwrap();
 
         assert_eq!(
             String::from_utf8(out).unwrap(),
-            format!("{}\n", r.formatted(true))
+            format!("{}\n", r.formatted(true, false))
         );
         assert!(err.is_empty());
     }
@@ -98,7 +99,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let mut out: Vec<u8> = Vec::new();
         let mut err: Vec<u8> = Vec::new();
-        let added = handle_line("foo", &mut rng, false, &mut out, &mut err).unwrap();
+        let added = handle_line("foo", &mut rng, false, false, &mut out, &mut err).unwrap();
 
         assert!(added);
         assert!(out.is_empty());
@@ -112,7 +113,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let mut out: Vec<u8> = Vec::new();
         let mut err: Vec<u8> = Vec::new();
-        let added = handle_line("", &mut rng, false, &mut out, &mut err).unwrap();
+        let added = handle_line("", &mut rng, false, false, &mut out, &mut err).unwrap();
 
         assert!(!added);
         assert!(out.is_empty());
@@ -124,7 +125,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let mut out: Vec<u8> = Vec::new();
         let mut err: Vec<u8> = Vec::new();
-        let added = handle_line("  \t  \n", &mut rng, false, &mut out, &mut err).unwrap();
+        let added = handle_line("  \t  \n", &mut rng, false, false, &mut out, &mut err).unwrap();
 
         assert!(!added);
         assert!(out.is_empty());
@@ -136,12 +137,20 @@ mod tests {
         let mut rng_a = StdRng::seed_from_u64(11);
         let mut out_a: Vec<u8> = Vec::new();
         let mut err_a: Vec<u8> = Vec::new();
-        handle_line("  2d6+1  \n", &mut rng_a, false, &mut out_a, &mut err_a).unwrap();
+        handle_line(
+            "  2d6+1  \n",
+            &mut rng_a,
+            false,
+            false,
+            &mut out_a,
+            &mut err_a,
+        )
+        .unwrap();
 
         let mut rng_b = StdRng::seed_from_u64(11);
         let mut out_b: Vec<u8> = Vec::new();
         let mut err_b: Vec<u8> = Vec::new();
-        handle_line("2d6+1", &mut rng_b, false, &mut out_b, &mut err_b).unwrap();
+        handle_line("2d6+1", &mut rng_b, false, false, &mut out_b, &mut err_b).unwrap();
 
         assert_eq!(out_a, out_b);
         assert!(err_a.is_empty());

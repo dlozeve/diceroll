@@ -18,6 +18,7 @@ use repl::{read_stdin, repl};
 struct Args {
     seed: Option<u64>,
     json: bool,
+    no_color: bool,
     expr: Option<String>,
 }
 
@@ -34,29 +35,37 @@ fn main() {
         dispatch(
             args.expr.as_deref(),
             args.json,
+            args.no_color,
             &mut StdRng::seed_from_u64(n),
         );
     } else {
-        dispatch(args.expr.as_deref(), args.json, &mut rand::rng());
+        dispatch(
+            args.expr.as_deref(),
+            args.json,
+            args.no_color,
+            &mut rand::rng(),
+        );
     }
 }
 
-fn dispatch<R: Rng>(expr: Option<&str>, json: bool, rng: &mut R) {
+fn dispatch<R: Rng>(expr: Option<&str>, json: bool, no_color: bool, rng: &mut R) {
     use std::io::IsTerminal;
+    let color =
+        !json && !no_color && env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal();
     let Some(expr) = expr else {
         if std::io::stdin().is_terminal() {
-            if let Err(e) = repl(rng, json) {
+            if let Err(e) = repl(rng, json, color) {
                 eprintln!("repl error: {e}");
                 process::exit(1);
             }
-        } else if let Err(e) = read_stdin(rng, json) {
+        } else if let Err(e) = read_stdin(rng, json, color) {
             eprintln!("stdin error: {e}");
             process::exit(1);
         }
         return;
     };
     match run(expr, rng) {
-        Ok(r) => println!("{}", r.formatted(json)),
+        Ok(r) => println!("{}", r.formatted(json, color)),
         Err(e) => {
             eprintln!("parse error: {e}");
             process::exit(1);
@@ -72,12 +81,14 @@ where
     let mut parser = lexopt::Parser::from_iter(iter);
     let mut seed = None;
     let mut json = false;
+    let mut no_color = false;
     let mut parts: Vec<String> = Vec::new();
 
     while let Some(arg) = parser.next()? {
         match arg {
             Long("seed") => seed = Some(parser.value()?.parse()?),
             Long("json") => json = true,
+            Long("no-color") => no_color = true,
             Short('h') | Long("help") => {
                 print_help();
                 process::exit(0);
@@ -92,15 +103,21 @@ where
     } else {
         Some(parts.join(" "))
     };
-    Ok(Args { seed, json, expr })
+    Ok(Args {
+        seed,
+        json,
+        no_color,
+        expr,
+    })
 }
 
 const HELP: &str = "\
-Usage: diceroll [--seed N] [--json] [EXPR ...]
+Usage: diceroll [--seed N] [--json] [--no-color] [EXPR ...]
 
 Options:
   --seed N      seed the RNG for reproducible rolls
   --json        output structured JSON
+  --no-color    disable ANSI color output (also honoured via NO_COLOR env var)
   -h, --help    show this help
 
 Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
@@ -133,6 +150,7 @@ mod tests {
             Args {
                 seed: None,
                 json: false,
+                no_color: false,
                 expr: None
             }
         );
@@ -145,6 +163,7 @@ mod tests {
             Args {
                 seed: Some(42),
                 json: false,
+                no_color: false,
                 expr: Some("2d6".into())
             },
         );
@@ -157,6 +176,7 @@ mod tests {
             Args {
                 seed: Some(42),
                 json: false,
+                no_color: false,
                 expr: Some("2d6".into())
             },
         );
@@ -169,6 +189,7 @@ mod tests {
             Args {
                 seed: Some(7),
                 json: false,
+                no_color: false,
                 expr: Some("2d6".into())
             },
         );
@@ -191,6 +212,7 @@ mod tests {
             Args {
                 seed: None,
                 json: true,
+                no_color: false,
                 expr: Some("2d6".into())
             },
         );
@@ -203,6 +225,7 @@ mod tests {
             Args {
                 seed: None,
                 json: true,
+                no_color: false,
                 expr: Some("2d6".into())
             },
         );
@@ -212,6 +235,19 @@ mod tests {
     fn multiple_positional_args_join_with_space() {
         let a = parse(&["2d20", "+", "3d6", "+", "4"]);
         assert_eq!(a.expr.as_deref(), Some("2d20 + 3d6 + 4"));
+    }
+
+    #[test]
+    fn no_color_flag() {
+        assert_eq!(
+            parse(&["--no-color", "2d6"]),
+            Args {
+                seed: None,
+                json: false,
+                no_color: true,
+                expr: Some("2d6".into())
+            },
+        );
     }
 
     #[test]
