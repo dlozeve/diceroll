@@ -110,7 +110,7 @@ fn parse_dice_modifier(input: &str) -> IResult<&str, (RawModifier, &str)> {
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
     let (input, count_str) = digit0(input)?;
     let (input, _) = one_of("dD").parse(input)?;
-    let (input, sides_str) = digit1(input)?;
+    let (input, sides_str) = alt((tag("%"), digit1)).parse(input)?;
     let (input, modifier) = opt(parse_dice_modifier).parse(input)?;
     Ok((
         input,
@@ -232,9 +232,13 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                     .parse()
                     .map_err(|_| ParseError::InvalidNumber(count_str.to_owned()))?
             };
-            let sides: u64 = sides_str
-                .parse()
-                .map_err(|_| ParseError::InvalidNumber(sides_str.to_owned()))?;
+            let sides: u64 = if sides_str == "%" {
+                100
+            } else {
+                sides_str
+                    .parse()
+                    .map_err(|_| ParseError::InvalidNumber(sides_str.to_owned()))?
+            };
             if count == 0 {
                 return Err(ParseError::ZeroDice);
             }
@@ -448,6 +452,21 @@ mod tests {
                 (1, Term::Const(4)),
                 (-1, Term::Const(1)),
             ],
+        );
+    }
+
+    #[test]
+    fn parse_percent_sides() {
+        assert_eq!(parse("d%").unwrap(), vec![(1, dice(1, 100))]);
+        assert_eq!(parse("3d%").unwrap(), vec![(1, dice(3, 100))]);
+        assert_eq!(parse("D%").unwrap(), vec![(1, dice(1, 100))]);
+    }
+
+    #[test]
+    fn parse_percent_with_modifier() {
+        assert_eq!(
+            parse("d%kh1").unwrap(),
+            vec![(1, dice_kd(1, 100, KeepDrop::KeepHighest(1)))],
         );
     }
 
