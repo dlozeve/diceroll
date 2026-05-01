@@ -91,6 +91,30 @@ impl serde::Serialize for DiceModifier {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiceSides {
+    Numeric(u64),
+    Fate,
+}
+
+impl std::fmt::Display for DiceSides {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiceSides::Numeric(n) => write!(f, "{n}"),
+            DiceSides::Fate => write!(f, "F"),
+        }
+    }
+}
+
+impl serde::Serialize for DiceSides {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            DiceSides::Numeric(n) => serializer.serialize_u64(*n),
+            DiceSides::Fate => serializer.serialize_str("F"),
+        }
+    }
+}
+
 pub(crate) fn serialize_dice_modifiers<S>(
     modifiers: &Option<Vec<DiceModifier>>,
     serializer: S,
@@ -109,7 +133,7 @@ where
 pub enum Term {
     Dice {
         count: u64,
-        sides: u64,
+        sides: DiceSides,
         modifier: Option<Vec<DiceModifier>>,
     },
     Const(u64),
@@ -128,7 +152,7 @@ type KeepDropCtor = fn(u64) -> KeepDrop;
 enum RawAtom<'a> {
     Dice {
         count_str: &'a str,
-        sides_str: &'a str,
+        sides: RawDiceSides<'a>,
         modifiers: Vec<RawDiceModifier<'a>>,
     },
     Const(&'a str),
@@ -143,6 +167,12 @@ enum RawDiceModifier<'a> {
     Min(&'a str),
     Max(&'a str),
     Reroll,
+}
+
+enum RawDiceSides<'a> {
+    Percent,
+    Fate,
+    Numeric(&'a str),
 }
 
 fn sign_to_i64(c: char) -> i64 {
@@ -178,13 +208,19 @@ fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
     let (input, count_str) = digit0(input)?;
     let (input, _) = one_of("dD").parse(input)?;
-    let (input, sides_str) = alt((tag("%"), digit1)).parse(input)?;
+    let (input, sides) = alt((
+        tag("%").map(|_| RawDiceSides::Percent),
+        tag("F").map(|_| RawDiceSides::Fate),
+        tag("f").map(|_| RawDiceSides::Fate),
+        digit1.map(RawDiceSides::Numeric),
+    ))
+    .parse(input)?;
     let (input, modifiers) = many0(parse_dice_modifier).parse(input)?;
     Ok((
         input,
         RawAtom::Dice {
             count_str,
-            sides_str,
+            sides,
             modifiers,
         },
     ))
@@ -289,7 +325,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
     match raw {
         RawAtom::Dice {
             count_str,
-            sides_str,
+            sides,
             modifiers,
         } => {
             let count: u64 = if count_str.is_empty() {
@@ -298,13 +334,6 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                 count_str
                     .parse()
                     .map_err(|_| ParseError::InvalidNumber(count_str.to_owned()))?
-            };
-            let sides: u64 = if sides_str == "%" {
-                100
-            } else {
-                sides_str
-                    .parse()
-                    .map_err(|_| ParseError::InvalidNumber(sides_str.to_owned()))?
             };
             if count == 0 {
                 return Err(ParseError::ZeroDice);
@@ -315,9 +344,19 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                     max: MAX_DICE_COUNT,
                 });
             }
-            if sides < 2 {
-                return Err(ParseError::TooFewSides);
-            }
+            let sides = match sides {
+                RawDiceSides::Percent => DiceSides::Numeric(100),
+                RawDiceSides::Fate => DiceSides::Fate,
+                RawDiceSides::Numeric(s) => {
+                    let n: u64 = s
+                        .parse()
+                        .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
+                    if n < 2 {
+                        return Err(ParseError::TooFewSides);
+                    }
+                    DiceSides::Numeric(n)
+                }
+            };
             let mut parsed_modifiers = Vec::with_capacity(modifiers.len());
             for modifier in modifiers {
                 let parsed = match modifier {
@@ -435,11 +474,11 @@ fn parse_nonempty(trimmed: &str) -> Result<Vec<(i64, Term)>, ParseError> {
 /// # Examples
 ///
 /// ```
-/// use diceroll::parser::{parse, Term};
+/// use diceroll::parser::{parse, DiceSides, Term};
 ///
 /// let terms = parse("2d6+3").unwrap();
 /// assert_eq!(terms, vec![
-///     (1,  Term::Dice { count: 2, sides: 6, modifier: None }),
+///     (1,  Term::Dice { count: 2, sides: DiceSides::Numeric(6), modifier: None }),
 ///     (1,  Term::Const(3)),
 /// ]);
 ///
@@ -468,7 +507,15 @@ mod tests {
     fn dice(count: u64, sides: u64) -> Term {
         Term::Dice {
             count,
-            sides,
+            sides: DiceSides::Numeric(sides),
+            modifier: None,
+        }
+    }
+
+    fn fate_dice(count: u64) -> Term {
+        Term::Dice {
+            count,
+            sides: DiceSides::Fate,
             modifier: None,
         }
     }
@@ -476,7 +523,7 @@ mod tests {
     fn dice_kd(count: u64, sides: u64, keep_drop: KeepDrop) -> Term {
         Term::Dice {
             count,
-            sides,
+            sides: DiceSides::Numeric(sides),
             modifier: Some(vec![DiceModifier::KeepDrop(keep_drop)]),
         }
     }
@@ -484,7 +531,7 @@ mod tests {
     fn dice_mod(count: u64, sides: u64, modifier: DiceModifier) -> Term {
         Term::Dice {
             count,
-            sides,
+            sides: DiceSides::Numeric(sides),
             modifier: Some(vec![modifier]),
         }
     }
@@ -492,7 +539,7 @@ mod tests {
     fn dice_mods(count: u64, sides: u64, modifiers: Vec<DiceModifier>) -> Term {
         Term::Dice {
             count,
-            sides,
+            sides: DiceSides::Numeric(sides),
             modifier: Some(modifiers),
         }
     }
@@ -562,6 +609,12 @@ mod tests {
         assert_eq!(parse("d%").unwrap(), vec![(1, dice(1, 100))]);
         assert_eq!(parse("3d%").unwrap(), vec![(1, dice(3, 100))]);
         assert_eq!(parse("D%").unwrap(), vec![(1, dice(1, 100))]);
+    }
+
+    #[test]
+    fn parse_fate_dice() {
+        assert_eq!(parse("dF").unwrap(), vec![(1, fate_dice(1))]);
+        assert_eq!(parse("4df").unwrap(), vec![(1, fate_dice(4))]);
     }
 
     #[test]

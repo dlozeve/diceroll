@@ -1,18 +1,19 @@
 use std::fmt::Write;
 
 use crate::eval::{EvalResult, EvalTerm, EvalTermKind};
+use crate::parser::DiceSides;
 
 const ANSI_RED: &str = "\x1b[31m";
 const ANSI_GREEN: &str = "\x1b[32m";
 const ANSI_RESET: &str = "\x1b[0m";
 
-fn format_roll(r: u64, sides: u64, color: bool) -> String {
-    if color && r == 1 {
-        format!("{ANSI_RED}{r}{ANSI_RESET}")
-    } else if color && r == sides {
-        format!("{ANSI_GREEN}{r}{ANSI_RESET}")
-    } else {
-        format!("{r}")
+fn format_roll(r: i64, sides: &DiceSides, color: bool) -> String {
+    match sides {
+        DiceSides::Numeric(n) if color && r == 1 => format!("{ANSI_RED}{r}{ANSI_RESET}"),
+        DiceSides::Numeric(n) if color && r == *n as i64 => {
+            format!("{ANSI_GREEN}{r}{ANSI_RESET}")
+        }
+        _ => format!("{r}"),
     }
 }
 
@@ -46,7 +47,7 @@ fn format_terms(terms: &[EvalTerm], color: bool) -> String {
                     if i > 0 {
                         out.push(',');
                     }
-                    let formatted = format_roll(*r, *sides, color);
+                    let formatted = format_roll(*r, sides, color);
                     if k {
                         out.push_str(&formatted);
                     } else {
@@ -194,6 +195,15 @@ mod tests {
     }
 
     #[test]
+    fn display_fate_dice_uses_d_f_notation() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("4dF", &mut rng).unwrap();
+        let d = r.display(false);
+        assert!(d.starts_with("4dF["), "got: {d}");
+        assert!(d.contains("-1") || d.contains("0") || d.contains("1"));
+    }
+
+    #[test]
     fn display_combined_modifiers_concatenates_them() {
         let mut rng = StdRng::seed_from_u64(1);
         let r = run("4d6rmin3kl4", &mut rng).unwrap();
@@ -302,6 +312,15 @@ mod tests {
             json.contains(r#""modifier":["r","min3","kl4"]"#),
             "got: {json}"
         );
+    }
+
+    #[test]
+    fn json_output_for_fate_dice_has_fate_sides() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let r = run("4dF", &mut rng).unwrap();
+        let json = r.json();
+        assert!(json.contains(r#""sides":"F""#), "got: {json}");
+        assert!(json.contains(r#""rolls":["#));
     }
 
     #[test]

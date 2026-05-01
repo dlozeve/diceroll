@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use crate::parser::{DiceModifier, KeepDrop, ParseError, Term, parse};
+use crate::parser::{DiceModifier, DiceSides, KeepDrop, ParseError, Term, parse};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EvalResult {
@@ -21,14 +21,14 @@ pub struct EvalTerm {
 pub enum EvalTermKind {
     Dice {
         count: u64,
-        sides: u64,
+        sides: DiceSides,
         #[serde(
             rename = "modifier",
             skip_serializing_if = "Option::is_none",
             serialize_with = "crate::parser::serialize_dice_modifiers"
         )]
         modifier: Option<Vec<DiceModifier>>,
-        rolls: Vec<u64>,
+        rolls: Vec<i64>,
         /// Parallel to `rolls`; `false` means the die was dropped.
         kept: Vec<bool>,
     },
@@ -64,7 +64,7 @@ pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, ParseError> {
 }
 
 // Sorts `indices` by roll value, marks the first `k` as `mark` (opposite of `default`).
-fn keep_mask(rolls: &[u64], k: usize, descending: bool, default: bool) -> Vec<bool> {
+fn keep_mask(rolls: &[i64], k: usize, descending: bool, default: bool) -> Vec<bool> {
     let n = rolls.len();
     let mut indices: Vec<usize> = (0..n).collect();
     if descending {
@@ -79,7 +79,7 @@ fn keep_mask(rolls: &[u64], k: usize, descending: bool, default: bool) -> Vec<bo
     mask
 }
 
-fn apply_keep_drop(keep_drop: Option<&KeepDrop>, rolls: &[u64]) -> Vec<bool> {
+fn apply_keep_drop(keep_drop: Option<&KeepDrop>, rolls: &[i64]) -> Vec<bool> {
     let n = rolls.len();
     let Some(kd) = keep_drop else {
         return vec![true; n];
@@ -89,6 +89,24 @@ fn apply_keep_drop(keep_drop: Option<&KeepDrop>, rolls: &[u64]) -> Vec<bool> {
         KeepDrop::KeepLowest(k) => keep_mask(rolls, *k as usize, false, false),
         KeepDrop::DropHighest(k) => keep_mask(rolls, *k as usize, true, true),
         KeepDrop::DropLowest(k) => keep_mask(rolls, *k as usize, false, true),
+    }
+}
+
+fn clamp_i64_from_u64(n: u64) -> i64 {
+    n.min(i64::MAX as u64) as i64
+}
+
+fn roll_once(rng: &mut impl Rng, sides: &DiceSides) -> i64 {
+    match sides {
+        DiceSides::Numeric(n) => rng.random_range(1..=(*n as i64)),
+        DiceSides::Fate => rng.random_range(0..=2) as i64 - 1,
+    }
+}
+
+fn is_natural_minimum(roll: i64, sides: &DiceSides) -> bool {
+    match sides {
+        DiceSides::Numeric(_) => roll == 1,
+        DiceSides::Fate => roll == -1,
     }
 }
 
@@ -105,30 +123,32 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                 modifier,
             } => {
                 let count = *count;
-                let sides = *sides;
-                let mut rolls: Vec<u64> = Vec::with_capacity(count as usize);
+                let sides = sides.clone();
+                let mut rolls: Vec<i64> = Vec::with_capacity(count as usize);
                 let mut kept = vec![true; count as usize];
                 for _ in 0..count {
-                    rolls.push(rng.random_range(1..=sides));
+                    rolls.push(roll_once(rng, &sides));
                 }
                 if let Some(modifiers) = modifier {
                     for modifier in modifiers {
                         match modifier {
                             DiceModifier::Reroll => {
                                 for roll in &mut rolls {
-                                    while *roll == 1 {
-                                        *roll = rng.random_range(1..=sides);
+                                    while is_natural_minimum(*roll, &sides) {
+                                        *roll = roll_once(rng, &sides);
                                     }
                                 }
                             }
                             DiceModifier::Min(min) => {
+                                let min = clamp_i64_from_u64(*min);
                                 for roll in &mut rolls {
-                                    *roll = (*roll).max(*min);
+                                    *roll = (*roll).max(min);
                                 }
                             }
                             DiceModifier::Max(max) => {
+                                let max = clamp_i64_from_u64(*max);
                                 for roll in &mut rolls {
-                                    *roll = (*roll).min(*max);
+                                    *roll = (*roll).min(max);
                                 }
                             }
                             DiceModifier::KeepDrop(kd) => {
@@ -137,7 +157,7 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                         }
                     }
                 }
-                let sum: u64 = rolls
+                let sum: i64 = rolls
                     .iter()
                     .zip(kept.iter())
                     .map(|(r, k)| if *k { *r } else { 0 })
@@ -145,12 +165,12 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                 (
                     EvalTermKind::Dice {
                         count,
-                        sides,
+                        sides: sides.clone(),
                         modifier: modifier.clone(),
                         rolls,
                         kept,
                     },
-                    sign * sum as i64,
+                    sign * sum,
                 )
             }
             Term::Const(n) => (EvalTermKind::Const { value: *n }, sign * *n as i64),
@@ -190,7 +210,7 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    fn sum_kept(rolls: &[u64], kept: &[bool]) -> u64 {
+    fn sum_kept(rolls: &[i64], kept: &[bool]) -> i64 {
         rolls
             .iter()
             .zip(kept)
@@ -319,6 +339,23 @@ mod tests {
             assert!(rolls.iter().all(|&r| r == 2));
             assert!(kept.iter().all(|&k| k));
             assert_eq!(r.total, 8);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_fate_dice_range() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4dF", &mut rng).unwrap();
+        if let EvalTermKind::Dice {
+            rolls, kept, sides, ..
+        } = &r.terms[0].kind
+        {
+            assert!(matches!(sides, DiceSides::Fate));
+            assert!(rolls.iter().all(|&r| (-1..=1).contains(&r)));
+            assert!(kept.iter().all(|&k| k));
+            assert!((-4..=4).contains(&r.total));
         } else {
             panic!("expected Dice term");
         }
