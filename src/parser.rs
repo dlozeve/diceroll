@@ -48,6 +48,17 @@ pub enum KeepDrop {
     DropLowest(u64),
 }
 
+impl std::fmt::Display for KeepDrop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeepDrop::KeepHighest(n) => write!(f, "kh{n}"),
+            KeepDrop::KeepLowest(n) => write!(f, "kl{n}"),
+            KeepDrop::DropHighest(n) => write!(f, "dh{n}"),
+            KeepDrop::DropLowest(n) => write!(f, "dl{n}"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Term {
     Dice {
@@ -66,19 +77,13 @@ pub enum Term {
 
 const MAX_DICE_COUNT: u64 = 1_000_000;
 
-#[derive(Clone, Copy)]
-enum RawModifier {
-    KeepHighest,
-    KeepLowest,
-    DropHighest,
-    DropLowest,
-}
+type KeepDropCtor = fn(u64) -> KeepDrop;
 
 enum RawAtom<'a> {
     Dice {
         count_str: &'a str,
         sides_str: &'a str,
-        modifier: Option<(RawModifier, &'a str)>,
+        modifier: Option<(KeepDropCtor, &'a str)>,
     },
     Const(&'a str),
     Group {
@@ -95,16 +100,16 @@ fn parse_sign(input: &str) -> IResult<&str, char> {
     one_of("+-").parse(input)
 }
 
-fn parse_dice_modifier(input: &str) -> IResult<&str, (RawModifier, &str)> {
-    let (input, kind) = alt((
-        tag("kh").map(|_| RawModifier::KeepHighest),
-        tag("kl").map(|_| RawModifier::KeepLowest),
-        tag("dh").map(|_| RawModifier::DropHighest),
-        tag("dl").map(|_| RawModifier::DropLowest),
+fn parse_dice_modifier(input: &str) -> IResult<&str, (KeepDropCtor, &str)> {
+    let (input, ctor) = alt((
+        tag("kh").map(|_| KeepDrop::KeepHighest as KeepDropCtor),
+        tag("kl").map(|_| KeepDrop::KeepLowest as KeepDropCtor),
+        tag("dh").map(|_| KeepDrop::DropHighest as KeepDropCtor),
+        tag("dl").map(|_| KeepDrop::DropLowest as KeepDropCtor),
     ))
     .parse(input)?;
     let (input, count_str) = digit1(input)?;
-    Ok((input, (kind, count_str)))
+    Ok((input, (ctor, count_str)))
 }
 
 fn parse_dice(input: &str) -> IResult<&str, RawAtom<'_>> {
@@ -134,7 +139,6 @@ fn parse_multiplier_str(input: &str) -> IResult<&str, &str> {
     digit1(input)
 }
 
-/// Parses `'(' inner ')'` and returns `(after_close, inner)`.
 fn parse_group_body(input: &str) -> IResult<&str, &str> {
     let after_open = input.strip_prefix('(').ok_or_else(|| {
         nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char))
@@ -253,19 +257,14 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
             }
             let keep_drop = match modifier {
                 None => None,
-                Some((kind, s)) => {
+                Some((ctor, s)) => {
                     let n: u64 = s
                         .parse()
                         .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?;
                     if n > count {
                         return Err(ParseError::ModifierExceedsDiceCount { count, modifier: n });
                     }
-                    Some(match kind {
-                        RawModifier::KeepHighest => KeepDrop::KeepHighest(n),
-                        RawModifier::KeepLowest => KeepDrop::KeepLowest(n),
-                        RawModifier::DropHighest => KeepDrop::DropHighest(n),
-                        RawModifier::DropLowest => KeepDrop::DropLowest(n),
-                    })
+                    Some(ctor(n))
                 }
             };
             Ok((

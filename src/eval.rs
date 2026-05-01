@@ -56,46 +56,32 @@ pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, ParseError> {
     Ok(evaluate(&terms, rng))
 }
 
-/// Returns a `kept` mask parallel to `rolls`: `false` = dropped.
+// Sorts `indices` by roll value, marks the first `k` as `mark` (opposite of `default`).
+fn keep_mask(rolls: &[u64], k: usize, descending: bool, default: bool) -> Vec<bool> {
+    let n = rolls.len();
+    let mut indices: Vec<usize> = (0..n).collect();
+    if descending {
+        indices.sort_by(|&a, &b| rolls[b].cmp(&rolls[a]));
+    } else {
+        indices.sort_by(|&a, &b| rolls[a].cmp(&rolls[b]));
+    }
+    let mut mask = vec![default; n];
+    for &i in indices.iter().take(k) {
+        mask[i] = !default;
+    }
+    mask
+}
+
 fn apply_keep_drop(keep_drop: Option<&KeepDrop>, rolls: &[u64]) -> Vec<bool> {
     let n = rolls.len();
     let Some(kd) = keep_drop else {
         return vec![true; n];
     };
-    let mut indices: Vec<usize> = (0..n).collect();
     match kd {
-        KeepDrop::KeepHighest(k) => {
-            indices.sort_by(|&a, &b| rolls[b].cmp(&rolls[a]));
-            let mut kept = vec![false; n];
-            for &i in indices.iter().take(*k as usize) {
-                kept[i] = true;
-            }
-            kept
-        }
-        KeepDrop::KeepLowest(k) => {
-            indices.sort_by(|&a, &b| rolls[a].cmp(&rolls[b]));
-            let mut kept = vec![false; n];
-            for &i in indices.iter().take(*k as usize) {
-                kept[i] = true;
-            }
-            kept
-        }
-        KeepDrop::DropHighest(k) => {
-            indices.sort_by(|&a, &b| rolls[b].cmp(&rolls[a]));
-            let mut kept = vec![true; n];
-            for &i in indices.iter().take(*k as usize) {
-                kept[i] = false;
-            }
-            kept
-        }
-        KeepDrop::DropLowest(k) => {
-            indices.sort_by(|&a, &b| rolls[a].cmp(&rolls[b]));
-            let mut kept = vec![true; n];
-            for &i in indices.iter().take(*k as usize) {
-                kept[i] = false;
-            }
-            kept
-        }
+        KeepDrop::KeepHighest(k) => keep_mask(rolls, *k as usize, true, false),
+        KeepDrop::KeepLowest(k) => keep_mask(rolls, *k as usize, false, false),
+        KeepDrop::DropHighest(k) => keep_mask(rolls, *k as usize, true, true),
+        KeepDrop::DropLowest(k) => keep_mask(rolls, *k as usize, false, true),
     }
 }
 
@@ -184,20 +170,8 @@ fn format_terms(terms: &[EvalTerm]) -> String {
                 kept,
             } => {
                 let _ = write!(out, "{count}d{sides}");
-                match keep_drop {
-                    Some(KeepDrop::KeepHighest(n)) => {
-                        let _ = write!(out, "kh{n}");
-                    }
-                    Some(KeepDrop::KeepLowest(n)) => {
-                        let _ = write!(out, "kl{n}");
-                    }
-                    Some(KeepDrop::DropHighest(n)) => {
-                        let _ = write!(out, "dh{n}");
-                    }
-                    Some(KeepDrop::DropLowest(n)) => {
-                        let _ = write!(out, "dl{n}");
-                    }
-                    None => {}
+                if let Some(kd) = keep_drop {
+                    let _ = write!(out, "{kd}");
                 }
                 out.push('[');
                 for (i, (r, &k)) in rolls.iter().zip(kept.iter()).enumerate() {
@@ -246,22 +220,7 @@ fn write_term_json(out: &mut String, term: &EvalTerm) {
                 term.sign
             );
             if let Some(kd) = keep_drop {
-                out.push_str("\"modifier\":\"");
-                match kd {
-                    KeepDrop::KeepHighest(n) => {
-                        let _ = write!(out, "kh{n}");
-                    }
-                    KeepDrop::KeepLowest(n) => {
-                        let _ = write!(out, "kl{n}");
-                    }
-                    KeepDrop::DropHighest(n) => {
-                        let _ = write!(out, "dh{n}");
-                    }
-                    KeepDrop::DropLowest(n) => {
-                        let _ = write!(out, "dl{n}");
-                    }
-                }
-                out.push_str("\",");
+                let _ = write!(out, "\"modifier\":\"{kd}\",");
             }
             out.push_str("\"rolls\":[");
             for (j, r) in rolls.iter().enumerate() {
@@ -367,6 +326,14 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    fn sum_kept(rolls: &[u64], kept: &[bool]) -> u64 {
+        rolls
+            .iter()
+            .zip(kept)
+            .map(|(r, &k)| if k { *r } else { 0 })
+            .sum()
+    }
+
     #[test]
     fn evaluate_constants_have_no_randomness() {
         let mut rng = StdRng::seed_from_u64(0);
@@ -436,13 +403,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let r = run("4d2kh1", &mut rng).unwrap();
         if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
-            let max_roll = *rolls.iter().max().unwrap();
-            let kept_roll: u64 = rolls
-                .iter()
-                .zip(kept.iter())
-                .map(|(r, k)| if *k { *r } else { 0 })
-                .sum();
-            assert_eq!(kept_roll, max_roll);
+            assert_eq!(sum_kept(rolls, kept), *rolls.iter().max().unwrap());
         } else {
             panic!("expected Dice term");
         }
@@ -453,13 +414,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let r = run("4d2kl1", &mut rng).unwrap();
         if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
-            let min_roll = *rolls.iter().min().unwrap();
-            let kept_roll: u64 = rolls
-                .iter()
-                .zip(kept.iter())
-                .map(|(r, k)| if *k { *r } else { 0 })
-                .sum();
-            assert_eq!(kept_roll, min_roll);
+            assert_eq!(sum_kept(rolls, kept), *rolls.iter().min().unwrap());
         } else {
             panic!("expected Dice term");
         }
