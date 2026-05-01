@@ -10,9 +10,16 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 mod repl;
+mod server;
 
 use diceroll::run;
 use repl::{read_stdin, repl};
+
+#[derive(Debug, PartialEq, Eq)]
+enum Command {
+    Run,
+    Serve,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct Args {
@@ -20,6 +27,7 @@ struct Args {
     json: bool,
     no_color: bool,
     expr: Option<String>,
+    command: Command,
 }
 
 fn main() {
@@ -32,19 +40,21 @@ fn main() {
     };
 
     if let Some(n) = args.seed {
-        dispatch(
-            args.expr.as_deref(),
-            args.json,
-            args.no_color,
-            &mut StdRng::seed_from_u64(n),
-        );
+        run_mode(args, &mut StdRng::seed_from_u64(n));
     } else {
-        dispatch(
-            args.expr.as_deref(),
-            args.json,
-            args.no_color,
-            &mut rand::rng(),
-        );
+        run_mode(args, &mut rand::rng());
+    }
+}
+
+fn run_mode<R: Rng>(args: Args, rng: &mut R) {
+    match args.command {
+        Command::Serve => {
+            if let Err(e) = server::serve(rng) {
+                eprintln!("server error: {e}");
+                process::exit(1);
+            }
+        }
+        Command::Run => dispatch(args.expr.as_deref(), args.json, args.no_color, rng),
     }
 }
 
@@ -83,6 +93,7 @@ where
     let mut json = false;
     let mut no_color = false;
     let mut parts: Vec<String> = Vec::new();
+    let mut command = Command::Run;
 
     while let Some(arg) = parser.next()? {
         match arg {
@@ -93,7 +104,16 @@ where
                 print_help();
                 process::exit(0);
             }
-            Value(v) => parts.push(v.string()?),
+            Value(v) => {
+                let value = v.string()?;
+                if command == Command::Run && parts.is_empty() && value == "serve" {
+                    command = Command::Serve;
+                } else if command == Command::Serve {
+                    return Err(lexopt::Error::UnexpectedArgument(value.into()));
+                } else {
+                    parts.push(value);
+                }
+            }
             _ => return Err(arg.unexpected()),
         }
     }
@@ -108,11 +128,13 @@ where
         json,
         no_color,
         expr,
+        command,
     })
 }
 
 const HELP: &str = "\
 Usage: diceroll [--seed N] [--json] [--no-color] [EXPR ...]
+       diceroll serve
 
 Options:
   --seed N      seed the RNG for reproducible rolls
@@ -121,6 +143,7 @@ Options:
   -h, --help    show this help
 
 Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
+`diceroll serve` exposes a local HTTP server on 127.0.0.1:8000 with GET /roll?q=...
 For an expression starting with '-', use '--' (e.g. diceroll -- -1d4+10).";
 
 fn print_help() {
@@ -151,7 +174,8 @@ mod tests {
                 seed: None,
                 json: false,
                 no_color: false,
-                expr: None
+                expr: None,
+                command: Command::Run
             }
         );
     }
@@ -164,7 +188,8 @@ mod tests {
                 seed: Some(42),
                 json: false,
                 no_color: false,
-                expr: Some("2d6".into())
+                expr: Some("2d6".into()),
+                command: Command::Run
             },
         );
     }
@@ -177,7 +202,8 @@ mod tests {
                 seed: Some(42),
                 json: false,
                 no_color: false,
-                expr: Some("2d6".into())
+                expr: Some("2d6".into()),
+                command: Command::Run
             },
         );
     }
@@ -190,7 +216,8 @@ mod tests {
                 seed: Some(7),
                 json: false,
                 no_color: false,
-                expr: Some("2d6".into())
+                expr: Some("2d6".into()),
+                command: Command::Run
             },
         );
     }
@@ -213,7 +240,8 @@ mod tests {
                 seed: None,
                 json: true,
                 no_color: false,
-                expr: Some("2d6".into())
+                expr: Some("2d6".into()),
+                command: Command::Run
             },
         );
     }
@@ -226,7 +254,8 @@ mod tests {
                 seed: None,
                 json: true,
                 no_color: false,
-                expr: Some("2d6".into())
+                expr: Some("2d6".into()),
+                command: Command::Run
             },
         );
     }
@@ -245,7 +274,8 @@ mod tests {
                 seed: None,
                 json: false,
                 no_color: true,
-                expr: Some("2d6".into())
+                expr: Some("2d6".into()),
+                command: Command::Run
             },
         );
     }
@@ -259,5 +289,12 @@ mod tests {
     fn double_dash_passes_through_negative_value() {
         let a = parse(&["--", "-1d4+10"]);
         assert_eq!(a.expr.as_deref(), Some("-1d4+10"));
+    }
+
+    #[test]
+    fn serve_subcommand_sets_command() {
+        let a = parse(&["serve"]);
+        assert_eq!(a.command, Command::Serve);
+        assert!(a.expr.is_none());
     }
 }
