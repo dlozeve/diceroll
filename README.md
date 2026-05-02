@@ -138,6 +138,26 @@ For all endpoints:
 - Encode arithmetic `+` as `%2B` in the query string, or use `curl --get --data-urlencode 'q=2d6+3'`
 - The default port is `8000` and can be configured with the `--port` argument
 
+### In the browser (WebAssembly)
+
+A WASM wrapper crate lives in [`diceroll_wasm/`](diceroll_wasm/) and powers a tiny static SPA in `diceroll_wasm/www/`.
+
+Build (requires [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)):
+
+```bash
+cd diceroll_wasm
+./build.sh
+```
+
+Then serve `diceroll_wasm/www/` with any static file server, e.g.:
+
+```bash
+cd diceroll_wasm/www
+python -m http.server 8000
+```
+
+and open <http://localhost:8000>.
+
 ## License
 
 Licensed under either of

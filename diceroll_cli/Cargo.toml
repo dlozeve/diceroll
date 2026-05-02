@@ -1,0 +1,22 @@
+[package]
+name = "diceroll_cli"
+version = "0.1.0"
+authors = ["Dimitri Lozeve"]
+license = "MIT OR Apache-2.0"
+edition = "2024"
+
+[[bin]]
+name = "diceroll"
+path = "src/main.rs"
+
+[dependencies]
+diceroll = { path = "../diceroll" }
+rand = "0.9"
+serde_json = "1"
+lexopt = "0.3"
+rustyline = "14"
+tiny_http = "0.12"
+form_urlencoded = "1"
+
+[lints]
+workspace = true

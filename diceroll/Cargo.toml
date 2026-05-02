@@ -1,0 +1,16 @@
+[package]
+name = "diceroll"
+version = "0.1.0"
+authors = ["Dimitri Lozeve"]
+license = "MIT OR Apache-2.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.9"
+nom = "8"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true
