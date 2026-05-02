@@ -1,7 +1,5 @@
 import init, { rollJson, stats } from "./pkg/diceroll_wasm.js";
 
-await init();
-
 const STATS_SAMPLES = 10000;
 
 const terminal = document.getElementById("terminal");
@@ -87,6 +85,7 @@ function rollNode(roll, sides) {
       const span = document.createElement("span");
       span.className = roll === 1 ? "nat-1" : "nat-max";
       span.textContent = String(roll);
+      span.setAttribute("aria-label", roll === 1 ? `${roll} (natural 1)` : `${roll} (critical)`);
       return span;
     }
   }
@@ -188,8 +187,20 @@ QUICK_DICE.forEach(({ label, expr }) => {
   btn.className = "dice-btn";
   btn.textContent = label;
   btn.setAttribute("aria-label", `Roll ${expr}`);
+  btn.disabled = true;
   btn.addEventListener("click", () => {
     submit(expr);
   });
   diceBar.appendChild(btn);
 });
+
+// Initialize WASM — input and buttons start disabled (see HTML)
+try {
+  await init();
+  input.disabled = false;
+  document.getElementById("roll-btn").disabled = false;
+  diceBar.querySelectorAll(".dice-btn").forEach((btn) => (btn.disabled = false));
+  input.focus();
+} catch (e) {
+  appendText("Failed to load the dice engine. Please reload the page.", "error");
+}

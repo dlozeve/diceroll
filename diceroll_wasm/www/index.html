@@ -71,8 +71,19 @@
         font-weight: 400;
         font-style: italic;
         font-size: 1.85rem;
-        letter-spacing: 0.01em;
+        line-height: 1;
+        letter-spacing: 0;
         color: var(--fg);
+      }
+
+      /* Enable OpenType features for the display typeface across all uses */
+      header h1,
+      #info-btn,
+      #hint,
+      #roll-btn {
+        font-variant-ligatures: common-ligatures;
+        font-kerning: normal;
+        text-rendering: optimizeLegibility;
       }
 
       #info-btn {
@@ -123,7 +134,7 @@
         color: var(--accent);
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-style: normal;
-        font-size: 0.88em;
+        font-size: 0.9em;
       }
       #hint p {
         margin: 0 0 0.5rem;
@@ -145,7 +156,7 @@
       }
       #hint .hint-row span {
         color: var(--muted);
-        font-size: 0.88rem;
+        font-size: 0.9rem;
       }
 
       #terminal {
@@ -156,6 +167,8 @@
         padding-left: max(1.25rem, env(safe-area-inset-left));
         padding-right: max(1.25rem, env(safe-area-inset-right));
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-variant-numeric: tabular-nums lining-nums;
+        line-height: 1.55;
         overscroll-behavior: contain;
       }
 @keyframes nat-max-pulse {
@@ -397,8 +410,9 @@
         autocorrect="off"
         spellcheck="false"
         autofocus
+        disabled
       />
-      <button id="roll-btn" aria-label="Roll">Roll</button>
+      <button id="roll-btn" aria-label="Roll" disabled>Roll</button>
     </div>
     <script type="module" src="./index.js"></script>
   </body>
