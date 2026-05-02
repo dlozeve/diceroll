@@ -35,7 +35,10 @@ function appendText(text, ...classes) {
 function appendRoll(result) {
   const div = appendLine();
   renderTerms(div, result.terms);
-  div.appendChild(document.createTextNode(` = ${result.total}`));
+  const total = document.createElement("span");
+  total.className = "total";
+  total.textContent = ` = ${result.total}`;
+  div.appendChild(total);
 }
 
 function renderTerms(parent, terms) {
@@ -90,6 +93,14 @@ function rollNode(roll, sides) {
   return document.createTextNode(String(roll));
 }
 
+function submit(line) {
+  if (line.trim()) {
+    history.push(line);
+    historyIndex = history.length;
+  }
+  evaluate(line);
+}
+
 function evaluate(line) {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -113,14 +124,19 @@ function evaluate(line) {
   }
 }
 
+const infoBtn = document.getElementById("info-btn");
+const hint = document.getElementById("hint");
+const infoBtnLabel = document.getElementById("info-btn-label");
+infoBtn.addEventListener("click", () => {
+  const open = hint.classList.toggle("open");
+  infoBtn.setAttribute("aria-expanded", String(open));
+  infoBtnLabel.textContent = open ? "Close" : "Help";
+});
+
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     const value = input.value;
-    if (value.trim()) {
-      history.push(value);
-      historyIndex = history.length;
-    }
-    evaluate(value);
+    submit(value);
     input.value = "";
   } else if (e.key === "ArrowUp") {
     if (historyIndex > 0) {
@@ -141,4 +157,39 @@ input.addEventListener("keydown", (e) => {
     }
     e.preventDefault();
   }
+});
+
+// Mobile: Roll button
+document.getElementById("roll-btn").addEventListener("click", () => {
+  submit(input.value);
+  input.value = "";
+  input.focus();
+});
+
+
+// Mobile: quick dice bar
+const QUICK_DICE = [
+  { label: "d4",       expr: "d4" },
+  { label: "d6",       expr: "d6" },
+  { label: "d8",       expr: "d8" },
+  { label: "d10",      expr: "d10" },
+  { label: "d12",      expr: "d12" },
+  { label: "d20",      expr: "d20" },
+  { label: "d100",     expr: "d100" },
+  { label: "2d6",      expr: "2d6" },
+  { label: "4d6kh3",   expr: "4d6kh3" },
+  { label: "2d20kh1",  expr: "2d20kh1" },
+  { label: "2d20kl1",  expr: "2d20kl1" },
+];
+
+const diceBar = document.getElementById("dice-bar");
+QUICK_DICE.forEach(({ label, expr }) => {
+  const btn = document.createElement("button");
+  btn.className = "dice-btn";
+  btn.textContent = label;
+  btn.setAttribute("aria-label", `Roll ${expr}`);
+  btn.addEventListener("click", () => {
+    submit(expr);
+  });
+  diceBar.appendChild(btn);
 });
