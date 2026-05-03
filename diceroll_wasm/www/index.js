@@ -16,8 +16,11 @@ function appendLine({ classes = [], echo = false } = {}) {
   div.classList.add("line", ...classes);
   if (echo) div.classList.add("echo");
   terminal.appendChild(div);
-  terminal.scrollTop = terminal.scrollHeight;
   return div;
+}
+
+function scrollTerminalToBottom() {
+  terminal.scrollTop = terminal.scrollHeight;
 }
 
 function appendEcho(line) {
@@ -206,6 +209,8 @@ function evaluate(line) {
   } catch (e) {
     appendText(e.message ?? String(e), "error");
   }
+
+  scrollTerminalToBottom();
 }
 
 async function submit(line) {
