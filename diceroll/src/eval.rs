@@ -64,17 +64,25 @@ pub fn run(expr: &str, rng: &mut impl Rng) -> Result<EvalResult, ParseError> {
     Ok(evaluate(&terms, rng))
 }
 
-// Sorts `indices` by roll value, marks the first `k` as `mark` (opposite of `default`).
+// Partitions `indices` so the first `k` entries are the selected dice.
 fn keep_mask(rolls: &[i64], k: usize, descending: bool, default: bool) -> Vec<bool> {
     let n = rolls.len();
+    if k == 0 {
+        return vec![default; n];
+    }
+    if k >= n {
+        return vec![!default; n];
+    }
+
     let mut indices: Vec<usize> = (0..n).collect();
     if descending {
-        indices.sort_by(|&a, &b| rolls[b].cmp(&rolls[a]));
+        indices.select_nth_unstable_by(k - 1, |&a: &usize, &b: &usize| rolls[b].cmp(&rolls[a]));
     } else {
-        indices.sort_by(|&a, &b| rolls[a].cmp(&rolls[b]));
+        indices.select_nth_unstable_by(k - 1, |&a: &usize, &b: &usize| rolls[a].cmp(&rolls[b]));
     }
+
     let mut mask = vec![default; n];
-    for &i in indices.iter().take(k) {
+    for &i in &indices[..k] {
         mask[i] = !default;
     }
     mask
