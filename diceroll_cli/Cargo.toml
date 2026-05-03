@@ -11,10 +11,10 @@ path = "src/main.rs"
 
 [dependencies]
 diceroll = { path = "../diceroll" }
-rand = "0.9"
+rand = "0.10"
 serde_json = "1"
 lexopt = "0.3"
-rustyline = "14"
+rustyline = "18"
 tiny_http = "0.12"
 form_urlencoded = "1"
 

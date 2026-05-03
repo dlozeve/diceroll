@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 use crate::model::{DiceModifier, DiceSides, KeepDrop, Term};
 use crate::parser::{ParseError, parse};

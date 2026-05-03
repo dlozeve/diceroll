@@ -105,7 +105,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::RngCore;
+    use rand::Rng;
 
     #[test]
     fn session_replays_the_same_sequence_for_the_same_seed() {
