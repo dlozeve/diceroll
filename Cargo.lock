@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "diceroll"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nom",
  "rand",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "diceroll_cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "diceroll",
  "form_urlencoded",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "diceroll_wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "console_error_panic_hook",
  "diceroll",
