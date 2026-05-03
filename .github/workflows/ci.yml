@@ -75,6 +75,41 @@ jobs:
           path: release/diceroll-${{ github.ref_name }}-${{ matrix.name }}
           if-no-files-found: error
 
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd diceroll_wasm
+          bash build.sh
+
+      - name: Package WASM
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          mkdir -p release
+          cp -r diceroll_wasm/www/pkg release/diceroll_wasm
+          cd release && tar -czvf "diceroll-${{ github.ref_name }}-wasm.tar.gz" diceroll_wasm
+
+      - name: Upload release artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: diceroll-wasm
+          path: release/diceroll-${{ github.ref_name }}-wasm.tar.gz
+          if-no-files-found: error
+
   release:
     name: release
     runs-on: ubuntu-latest
