@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 edition = "2024"
 
 [dependencies]
-rand = "0.10"
+rand = { version = "0.10", default-features = false }
 nom = "8"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
