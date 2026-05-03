@@ -179,14 +179,28 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                                     }
                                 }
                             }
+                            DiceModifier::CountMatching(comp) => {
+                                for (roll, k) in rolls.iter().zip(kept.iter_mut()) {
+                                    if *k && !comp.test(*roll) {
+                                        *k = false;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-                let sum: i64 = rolls
-                    .iter()
-                    .zip(kept.iter())
-                    .map(|(r, k)| if *k { *r } else { 0 })
-                    .sum();
+                let is_count_mode = modifier.as_ref().is_some_and(|mods| {
+                    matches!(mods.last(), Some(DiceModifier::CountMatching(_)))
+                });
+                let sum: i64 = if is_count_mode {
+                    kept.iter().filter(|&&k| k).count() as i64
+                } else {
+                    rolls
+                        .iter()
+                        .zip(kept.iter())
+                        .map(|(r, k)| if *k { *r } else { 0 })
+                        .sum()
+                };
                 (
                     EvalTermKind::Dice {
                         count,
@@ -391,6 +405,77 @@ mod tests {
             assert!(rolls.iter().all(|&r| r == 2));
             assert!(kept.iter().all(|&k| k));
             assert_eq!(r.total, 8);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_count_successes_counts_matching_dice() {
+        let mut rng = StdRng::seed_from_u64(0);
+        // 8d6c>3: count dice that rolled > 3
+        let r = run("8d6c>3", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            assert_eq!(rolls.len(), 8);
+            let expected: i64 = rolls.iter().filter(|&&v| v > 3).count() as i64;
+            assert_eq!(r.total, expected);
+            // kept matches the condition
+            for (&roll, &k) in rolls.iter().zip(kept.iter()) {
+                assert_eq!(k, roll > 3);
+            }
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_count_successes_gte() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let r = run("8d6c>=4", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            for (&roll, &k) in rolls.iter().zip(kept.iter()) {
+                assert_eq!(k, roll >= 4);
+            }
+            let expected: i64 = rolls.iter().filter(|&&v| v >= 4).count() as i64;
+            assert_eq!(r.total, expected);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_count_failures_counts_matching_dice() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("8d6c<2", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            let expected: i64 = rolls.iter().filter(|&&v| v < 2).count() as i64;
+            assert_eq!(r.total, expected);
+            for (&roll, &k) in rolls.iter().zip(kept.iter()) {
+                assert_eq!(k, roll < 2);
+            }
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_count_successes_total_in_range() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let r = run("100d6c>3", &mut rng).unwrap();
+        assert!((0..=100).contains(&r.total));
+    }
+
+    #[test]
+    fn evaluate_count_with_keep_drop_respects_dropped_dice() {
+        // dl1 drops the lowest, then c>3 counts matches among remaining 3 dice
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("4d6dl1c>3", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            assert_eq!(rolls.len(), 4);
+            // at most 3 can be kept (one dropped by dl1)
+            assert!(kept.iter().filter(|&&k| k).count() <= 3);
+            // total is the count of kept dice
+            assert_eq!(r.total, kept.iter().filter(|&&k| k).count() as i64);
         } else {
             panic!("expected Dice term");
         }

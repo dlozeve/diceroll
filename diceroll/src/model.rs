@@ -1,4 +1,40 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Comparison {
+    Gt(u64),
+    Gte(u64),
+    Lt(u64),
+    Lte(u64),
+}
+
+impl Comparison {
+    pub(crate) fn test(&self, roll: i64) -> bool {
+        match self {
+            Comparison::Gt(n) => roll > *n as i64,
+            Comparison::Gte(n) => roll >= *n as i64,
+            Comparison::Lt(n) => roll < *n as i64,
+            Comparison::Lte(n) => roll <= *n as i64,
+        }
+    }
+}
+
+impl std::fmt::Display for Comparison {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Comparison::Gt(n) => write!(f, ">{n}"),
+            Comparison::Gte(n) => write!(f, ">={n}"),
+            Comparison::Lt(n) => write!(f, "<{n}"),
+            Comparison::Lte(n) => write!(f, "<={n}"),
+        }
+    }
+}
+
+impl serde::Serialize for Comparison {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiceModifier {
     KeepDrop(KeepDrop),
     Min(u64),
@@ -6,6 +42,7 @@ pub enum DiceModifier {
     Reroll,
     RerollOnce,
     Exploding,
+    CountMatching(Comparison),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +73,7 @@ impl std::fmt::Display for DiceModifier {
             DiceModifier::Reroll => write!(f, "r"),
             DiceModifier::RerollOnce => write!(f, "ro"),
             DiceModifier::Exploding => write!(f, "!"),
+            DiceModifier::CountMatching(comp) => write!(f, "c{comp}"),
         }
     }
 }

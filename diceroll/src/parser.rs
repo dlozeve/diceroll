@@ -7,7 +7,7 @@ use nom::{
     multi::many0,
 };
 
-use crate::model::{DiceModifier, DiceSides, KeepDrop, Term};
+use crate::model::{Comparison, DiceModifier, DiceSides, KeepDrop, Term};
 
 /// Typed parse errors returned by [`parse`].
 ///
@@ -39,6 +39,8 @@ pub enum ParseError {
     ModifierExceedsDiceCount { count: u64, modifier: u64 },
     #[error("invalid number: '{0}'")]
     InvalidNumber(String),
+    #[error("count modifier (cs/cf) must be the last modifier")]
+    CountModifierNotLast,
 }
 
 const MAX_DICE_COUNT: u64 = 1_000_000;
@@ -58,6 +60,13 @@ enum RawAtom<'a> {
     },
 }
 
+enum RawComparison<'a> {
+    Gt(&'a str),
+    Gte(&'a str),
+    Lt(&'a str),
+    Lte(&'a str),
+}
+
 enum RawDiceModifier<'a> {
     KeepDrop(KeepDropCtor, &'a str),
     Min(&'a str),
@@ -65,6 +74,7 @@ enum RawDiceModifier<'a> {
     Reroll,
     RerollOnce,
     Exploding,
+    CountMatching(RawComparison<'a>),
 }
 
 enum RawDiceSides<'a> {
@@ -79,6 +89,16 @@ fn sign_to_i64(c: char) -> i64 {
 
 fn parse_sign(input: &str) -> IResult<&str, char> {
     one_of("+-").parse(input)
+}
+
+fn parse_comparison(input: &str) -> IResult<&str, RawComparison<'_>> {
+    alt((
+        tag(">=").and(digit1).map(|(_, n)| RawComparison::Gte(n)),
+        tag(">").and(digit1).map(|(_, n)| RawComparison::Gt(n)),
+        tag("<=").and(digit1).map(|(_, n)| RawComparison::Lte(n)),
+        tag("<").and(digit1).map(|(_, n)| RawComparison::Lt(n)),
+    ))
+    .parse(input)
 }
 
 fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
@@ -101,6 +121,9 @@ fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
     let parse_reroll_once = tag("ro").map(|_| RawDiceModifier::RerollOnce);
     let parse_reroll = tag("r").map(|_| RawDiceModifier::Reroll);
     let parse_exploding = tag("!").map(|_| RawDiceModifier::Exploding);
+    let parse_count = tag("c")
+        .and(parse_comparison)
+        .map(|(_, comp)| RawDiceModifier::CountMatching(comp));
 
     alt((
         parse_keep_drop,
@@ -109,6 +132,7 @@ fn parse_dice_modifier(input: &str) -> IResult<&str, RawDiceModifier<'_>> {
         parse_reroll_once,
         parse_reroll,
         parse_exploding,
+        parse_count,
     ))
     .parse(input)
 }
@@ -229,6 +253,31 @@ fn parse_subsequent_term(input: &str) -> IResult<&str, (char, RawAtom<'_>)> {
     Ok((input, (sign, atom)))
 }
 
+impl TryFrom<RawComparison<'_>> for Comparison {
+    type Error = ParseError;
+
+    fn try_from(raw: RawComparison<'_>) -> Result<Self, Self::Error> {
+        Ok(match raw {
+            RawComparison::Gt(s) => Comparison::Gt(
+                s.parse()
+                    .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?,
+            ),
+            RawComparison::Gte(s) => Comparison::Gte(
+                s.parse()
+                    .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?,
+            ),
+            RawComparison::Lt(s) => Comparison::Lt(
+                s.parse()
+                    .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?,
+            ),
+            RawComparison::Lte(s) => Comparison::Lte(
+                s.parse()
+                    .map_err(|_| ParseError::InvalidNumber(s.to_owned()))?,
+            ),
+        })
+    }
+}
+
 fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError> {
     match raw {
         RawAtom::Dice {
@@ -295,8 +344,18 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                     RawDiceModifier::Reroll => DiceModifier::Reroll,
                     RawDiceModifier::RerollOnce => DiceModifier::RerollOnce,
                     RawDiceModifier::Exploding => DiceModifier::Exploding,
+                    RawDiceModifier::CountMatching(comp) => {
+                        DiceModifier::CountMatching(comp.try_into()?)
+                    }
                 };
                 parsed_modifiers.push(parsed);
+            }
+            for (i, modifier) in parsed_modifiers.iter().enumerate() {
+                if matches!(modifier, DiceModifier::CountMatching(_))
+                    && i + 1 != parsed_modifiers.len()
+                {
+                    return Err(ParseError::CountModifierNotLast);
+                }
             }
             let modifier = if parsed_modifiers.is_empty() {
                 None
@@ -561,6 +620,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_count_matching_all_comparisons() {
+        for (expr, expected) in [
+            ("8d6c>3", DiceModifier::CountMatching(Comparison::Gt(3))),
+            ("8d6c>=3", DiceModifier::CountMatching(Comparison::Gte(3))),
+            ("8d6c<3", DiceModifier::CountMatching(Comparison::Lt(3))),
+            ("8d6c<=3", DiceModifier::CountMatching(Comparison::Lte(3))),
+        ] {
+            assert_eq!(
+                parse(expr).unwrap(),
+                vec![(1, dice_mod(8, 6, expected))],
+                "failed for {expr}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_count_modifier_must_be_last() {
+        assert!(parse("8d6c>3kh4").is_err());
+        assert!(parse("8d6c<2r").is_err());
+        assert!(matches!(
+            parse("8d6c>3kh4"),
+            Err(ParseError::CountModifierNotLast)
+        ));
+    }
+
+    #[test]
+    fn parse_count_modifier_combined_with_earlier_modifiers() {
+        assert_eq!(
+            parse("8d6rc>3").unwrap(),
+            vec![(
+                1,
+                dice_mods(
+                    8,
+                    6,
+                    vec![
+                        DiceModifier::Reroll,
+                        DiceModifier::CountMatching(Comparison::Gt(3))
+                    ]
+                )
+            )]
+        );
+    }
+
+    #[test]
     fn parse_reroll_once_modifier() {
         assert_eq!(
             parse("4d6ro").unwrap(),
@@ -574,10 +677,7 @@ mod tests {
             parse("4d6r").unwrap(),
             vec![(1, dice_mod(4, 6, DiceModifier::Reroll))],
         );
-        assert_ne!(
-            parse("4d6r").unwrap(),
-            parse("4d6ro").unwrap(),
-        );
+        assert_ne!(parse("4d6r").unwrap(), parse("4d6ro").unwrap(),);
     }
 
     #[test]
