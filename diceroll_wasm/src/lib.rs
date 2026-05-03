@@ -1,4 +1,4 @@
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -81,7 +81,8 @@ impl Session {
     /// Roll an expression using this session's RNG stream.
     #[wasm_bindgen(js_name = rollJson)]
     pub fn roll_json(&mut self, expr: &str) -> Result<JsValue, JsError> {
-        let result = diceroll::run(expr, &mut self.rng).map_err(|e| JsError::new(&e.to_string()))?;
+        let result =
+            diceroll::run(expr, &mut self.rng).map_err(|e| JsError::new(&e.to_string()))?;
         to_js(&result)
     }
 
@@ -116,7 +117,9 @@ mod tests {
                 .iter()
                 .map(|line| {
                     if let Some(expr) = line.strip_prefix("stats ") {
-                        diceroll::stats::run_stats(expr, 8, &mut rng).unwrap().to_string()
+                        diceroll::stats::run_stats(expr, 8, &mut rng)
+                            .unwrap()
+                            .to_string()
                     } else {
                         diceroll::run(line, &mut rng)
                             .unwrap()
@@ -126,7 +129,10 @@ mod tests {
                 .collect()
         }
 
-        assert_eq!(replay("0x1234abcd", &commands), replay("0x1234abcd", &commands));
+        assert_eq!(
+            replay("0x1234abcd", &commands),
+            replay("0x1234abcd", &commands)
+        );
     }
 
     #[test]
