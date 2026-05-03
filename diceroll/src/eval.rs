@@ -147,6 +147,13 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                                     }
                                 }
                             }
+                            DiceModifier::RerollOnce => {
+                                for roll in &mut rolls {
+                                    if is_natural_minimum(*roll, &sides) {
+                                        *roll = roll_once(rng, &sides);
+                                    }
+                                }
+                            }
                             DiceModifier::Min(min) => {
                                 let min = clamp_i64_from_u64(*min);
                                 for roll in &mut rolls {
@@ -384,6 +391,34 @@ mod tests {
             assert!(rolls.iter().all(|&r| r == 2));
             assert!(kept.iter().all(|&k| k));
             assert_eq!(r.total, 8);
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_reroll_once_rerolls_minimum_at_most_once() {
+        // With a d2, ro rerolls a 1 exactly once — the result may still be 1.
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("100d2ro", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            assert_eq!(rolls.len(), 100);
+            assert!(kept.iter().all(|&k| k));
+            assert!(rolls.iter().all(|&r| (1..=2).contains(&r)));
+        } else {
+            panic!("expected Dice term");
+        }
+    }
+
+    #[test]
+    fn evaluate_reroll_once_does_not_loop() {
+        // d2ro with a fixed seed that would keep producing 1s — ro stops after one reroll,
+        // so unlike r it cannot loop forever.
+        let mut rng = StdRng::seed_from_u64(42);
+        let r = run("4d2ro", &mut rng).unwrap();
+        if let EvalTermKind::Dice { rolls, kept, .. } = &r.terms[0].kind {
+            assert_eq!(rolls.len(), 4);
+            assert!(kept.iter().all(|&k| k));
         } else {
             panic!("expected Dice term");
         }
