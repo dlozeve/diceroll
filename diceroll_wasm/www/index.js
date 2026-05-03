@@ -1,10 +1,14 @@
-import init, { rollJson, stats } from "./pkg/diceroll_wasm.js";
+import init, { Session } from "./pkg/diceroll_wasm.js";
 
 const STATS_SAMPLES = 10000;
+const URL_SEED_KEY = "seed";
+const URL_HISTORY_KEY = "h";
 
 const terminal = document.getElementById("terminal");
 const input = document.getElementById("input");
-const history = [];
+let session = null;
+let sessionSeed = null;
+const submittedHistory = [];
 let historyIndex = 0;
 
 function appendLine({ classes = [], echo = false } = {}) {
@@ -92,35 +96,157 @@ function rollNode(roll, sides) {
   return document.createTextNode(String(roll));
 }
 
-function submit(line) {
-  if (line.trim()) {
-    history.push(line);
-    historyIndex = history.length;
+function generateSeed() {
+  const bytes = new Uint32Array(2);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (n) => n.toString(16).padStart(8, "0")).join("");
+}
+
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
   }
-  evaluate(line);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function base64UrlToBytes(text) {
+  let base64 = text.replaceAll("-", "+").replaceAll("_", "/");
+  while (base64.length % 4) base64 += "=";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function encodeHistory(history) {
+  const json = JSON.stringify(history);
+  const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  return bytesToBase64Url(bytes);
+}
+
+async function decodeHistory(text) {
+  const bytes = base64UrlToBytes(text);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const json = await new Response(stream).text();
+  const value = JSON.parse(json);
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error("invalid history");
+  }
+  return value;
+}
+
+async function readSessionFromUrl() {
+  const params = new URL(window.location.href).searchParams;
+  const seed = params.get(URL_SEED_KEY);
+  const historyText = params.get(URL_HISTORY_KEY);
+
+  if (!seed && !historyText) {
+    return null;
+  }
+
+  if (!seed) {
+    return null;
+  }
+
+  let parsedHistory = [];
+  if (historyText) {
+    try {
+      parsedHistory = await decodeHistory(historyText);
+    } catch {
+      return null;
+    }
+  }
+
+  return { seed, history: parsedHistory };
+}
+
+async function syncUrl() {
+  const url = new URL(window.location.href);
+  if (sessionSeed) {
+    url.searchParams.set(URL_SEED_KEY, sessionSeed);
+    url.searchParams.set(URL_HISTORY_KEY, await encodeHistory(submittedHistory));
+  } else {
+    url.searchParams.delete(URL_SEED_KEY);
+    url.searchParams.delete(URL_HISTORY_KEY);
+  }
+  history.replaceState(null, "", url);
+}
+
+function startSession(seed) {
+  sessionSeed = seed;
+  session = new Session(seed);
+}
+
+async function clearSession() {
+  session = null;
+  sessionSeed = null;
+  submittedHistory.length = 0;
+  historyIndex = 0;
+  terminal.replaceChildren();
+  await syncUrl();
 }
 
 function evaluate(line) {
   const trimmed = line.trim();
   if (!trimmed) return;
 
-  if (trimmed === "clear") {
-    terminal.replaceChildren();
-    return;
-  }
-
   appendEcho(line);
 
   const statsMatch = trimmed.match(/^stats\s+(.+)$/i);
   try {
     if (statsMatch) {
-      appendText(stats(statsMatch[1], STATS_SAMPLES));
+      appendText(session.stats(statsMatch[1], STATS_SAMPLES));
     } else {
-      appendRoll(rollJson(trimmed));
+      appendRoll(session.rollJson(trimmed));
     }
   } catch (e) {
     appendText(e.message ?? String(e), "error");
   }
+}
+
+async function submit(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+
+  if (trimmed === "clear") {
+    await clearSession();
+    return;
+  }
+
+  if (!session) {
+    startSession(generateSeed());
+  }
+
+  submittedHistory.push(line);
+  historyIndex = submittedHistory.length;
+  await syncUrl();
+  evaluate(line);
+}
+
+async function restoreSessionFromUrl() {
+  const state = await readSessionFromUrl();
+  if (!state) {
+    await clearSession();
+    return;
+  }
+
+  submittedHistory.splice(0, submittedHistory.length, ...state.history);
+  historyIndex = submittedHistory.length;
+
+  try {
+    startSession(state.seed);
+  } catch {
+    await clearSession();
+    return;
+  }
+
+  await syncUrl();
+  terminal.replaceChildren();
+  submittedHistory.forEach((line) => evaluate(line));
 }
 
 const infoBtn = document.getElementById("info-btn");
@@ -135,23 +261,23 @@ infoBtn.addEventListener("click", () => {
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     const value = input.value;
-    submit(value);
+    void submit(value);
     input.value = "";
   } else if (e.key === "ArrowUp") {
     if (historyIndex > 0) {
       historyIndex--;
-      input.value = history[historyIndex];
+      input.value = submittedHistory[historyIndex];
       requestAnimationFrame(() =>
         input.setSelectionRange(input.value.length, input.value.length),
       );
     }
     e.preventDefault();
   } else if (e.key === "ArrowDown") {
-    if (historyIndex < history.length - 1) {
+    if (historyIndex < submittedHistory.length - 1) {
       historyIndex++;
-      input.value = history[historyIndex];
+      input.value = submittedHistory[historyIndex];
     } else {
-      historyIndex = history.length;
+      historyIndex = submittedHistory.length;
       input.value = "";
     }
     e.preventDefault();
@@ -160,7 +286,7 @@ input.addEventListener("keydown", (e) => {
 
 // Mobile: Roll button
 document.getElementById("roll-btn").addEventListener("click", () => {
-  submit(input.value);
+  void submit(input.value);
   input.value = "";
   input.focus();
 });
@@ -197,6 +323,7 @@ QUICK_DICE.forEach(({ label, expr }) => {
 // Initialize WASM — input and buttons start disabled (see HTML)
 try {
   await init();
+  await restoreSessionFromUrl();
   input.disabled = false;
   document.getElementById("roll-btn").disabled = false;
   diceBar.querySelectorAll(".dice-btn").forEach((btn) => (btn.disabled = false));
