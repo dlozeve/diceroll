@@ -39,8 +39,10 @@ pub enum ParseError {
     ModifierExceedsDiceCount { count: u64, modifier: u64 },
     #[error("invalid number: '{0}'")]
     InvalidNumber(String),
-    #[error("count modifier (cs/cf) must be the last modifier")]
-    CountModifierNotLast,
+    #[error(
+        "invalid modifier order in '{modifiers}': per-die modifiers must come before keep/drop modifiers, and count matching must be last"
+    )]
+    InvalidModifierOrder { modifiers: String },
 }
 
 const MAX_DICE_COUNT: u64 = 1_000_000;
@@ -85,6 +87,18 @@ enum RawDiceSides<'a> {
 
 fn sign_to_i64(c: char) -> i64 {
     if c == '-' { -1 } else { 1 }
+}
+
+fn modifier_stage(modifier: &DiceModifier) -> u8 {
+    match modifier {
+        DiceModifier::Min(_)
+        | DiceModifier::Max(_)
+        | DiceModifier::Reroll
+        | DiceModifier::RerollOnce
+        | DiceModifier::Exploding => 0,
+        DiceModifier::KeepDrop(_) => 1,
+        DiceModifier::CountMatching(_) => 2,
+    }
 }
 
 fn parse_sign(input: &str) -> IResult<&str, char> {
@@ -350,12 +364,22 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                 };
                 parsed_modifiers.push(parsed);
             }
+            let mut prev_stage = 0;
             for (i, modifier) in parsed_modifiers.iter().enumerate() {
+                let stage = modifier_stage(modifier);
+                if stage < prev_stage {
+                    return Err(ParseError::InvalidModifierOrder {
+                        modifiers: parsed_modifiers.iter().map(ToString::to_string).collect(),
+                    });
+                }
                 if matches!(modifier, DiceModifier::CountMatching(_))
                     && i + 1 != parsed_modifiers.len()
                 {
-                    return Err(ParseError::CountModifierNotLast);
+                    return Err(ParseError::InvalidModifierOrder {
+                        modifiers: parsed_modifiers.iter().map(ToString::to_string).collect(),
+                    });
                 }
+                prev_stage = stage;
             }
             let modifier = if parsed_modifiers.is_empty() {
                 None
@@ -636,12 +660,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_count_modifier_must_be_last() {
+    fn parse_invalid_modifier_order() {
         assert!(parse("8d6c>3kh4").is_err());
         assert!(parse("8d6c<2r").is_err());
+        assert!(parse("4d6kh4r").is_err());
         assert!(matches!(
             parse("8d6c>3kh4"),
-            Err(ParseError::CountModifierNotLast)
+            Err(ParseError::InvalidModifierOrder { .. })
+        ));
+        assert!(matches!(
+            parse("4d6kh4r"),
+            Err(ParseError::InvalidModifierOrder { .. })
         ));
     }
 
@@ -969,6 +998,28 @@ mod tests {
     }
 
     #[test]
+    fn error_invalid_modifier_order() {
+        assert_eq!(
+            parse("4d6kh4r"),
+            Err(ParseError::InvalidModifierOrder {
+                modifiers: "kh4r".into()
+            })
+        );
+        assert_eq!(
+            parse("8d6c>3kh4"),
+            Err(ParseError::InvalidModifierOrder {
+                modifiers: "c>3kh4".into()
+            })
+        );
+        assert_eq!(
+            parse("8d6c>3r"),
+            Err(ParseError::InvalidModifierOrder {
+                modifiers: "c>3r".into()
+            })
+        );
+    }
+
+    #[test]
     fn display_messages_match_original() {
         assert_eq!(ParseError::Empty.to_string(), "empty expression");
         assert_eq!(
@@ -1010,6 +1061,13 @@ mod tests {
         assert_eq!(
             ParseError::InvalidNumber("xyz".into()).to_string(),
             "invalid number: 'xyz'"
+        );
+        assert_eq!(
+            ParseError::InvalidModifierOrder {
+                modifiers: "kh4r".into()
+            }
+            .to_string(),
+            "invalid modifier order in 'kh4r': per-die modifiers must come before keep/drop modifiers, and count matching must be last"
         );
     }
 }
