@@ -11,12 +11,24 @@
     <link rel="manifest" href="/site.webmanifest">
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=IM+Fell+DW+Pica:ital@0;1&display=swap"
-    />
+    <style>
+      @font-face {
+        font-family: "IM Fell DW Pica";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/webfonts/im-fell-dw-pica-latin-400-normal.woff2") format("woff2"),
+             url("/webfonts/im-fell-dw-pica-latin-400-normal.woff") format("woff");
+      }
+      @font-face {
+        font-family: "IM Fell DW Pica";
+        font-style: italic;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/webfonts/im-fell-dw-pica-latin-400-italic.woff2") format("woff2"),
+             url("/webfonts/im-fell-dw-pica-latin-400-italic.woff") format("woff");
+      }
+    </style>
     <style>
       :root {
         --bg: #14171f;
