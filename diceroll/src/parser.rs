@@ -36,7 +36,7 @@ pub enum ParseError {
     #[error("dice count exceeds maximum of {max}")]
     DiceCountExceeded { count: u64, max: u64 },
     #[error("modifier {modifier} exceeds dice count {count}")]
-    ModifierExceedsDiceCount { count: u64, modifier: u64 },
+    ModifierExceedsDiceCount { count: u64, modifier: String },
     #[error("invalid number: '{0}'")]
     InvalidNumber(String),
     #[error(
@@ -338,7 +338,7 @@ fn validate_atom(sign: i64, raw: RawAtom<'_>) -> Result<(i64, Term), ParseError>
                         if n > count {
                             return Err(ParseError::ModifierExceedsDiceCount {
                                 count,
-                                modifier: n,
+                                modifier: format!("{}", DiceModifier::KeepDrop(ctor(n))),
                             });
                         }
                         DiceModifier::KeepDrop(ctor(n))
@@ -972,20 +972,20 @@ mod tests {
 
     #[test]
     fn error_modifier_exceeds_count() {
-        assert!(matches!(
+        assert_eq!(
             parse("4d6kh5"),
             Err(ParseError::ModifierExceedsDiceCount {
                 count: 4,
-                modifier: 5
+                modifier: "kh5".into()
             })
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse("4d6dl5"),
             Err(ParseError::ModifierExceedsDiceCount {
                 count: 4,
-                modifier: 5
+                modifier: "dl5".into()
             })
-        ));
+        );
     }
 
     #[test]
@@ -1053,10 +1053,10 @@ mod tests {
         assert_eq!(
             ParseError::ModifierExceedsDiceCount {
                 count: 4,
-                modifier: 5
+                modifier: "kh5".into()
             }
             .to_string(),
-            "modifier 5 exceeds dice count 4"
+            "modifier kh5 exceeds dice count 4"
         );
         assert_eq!(
             ParseError::InvalidNumber("xyz".into()).to_string(),
