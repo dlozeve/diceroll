@@ -129,89 +129,7 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
                 count,
                 sides,
                 modifier,
-            } => {
-                let count = *count;
-                let sides = sides.clone();
-                let mut rolls: Vec<i64> = Vec::with_capacity(count as usize);
-                let mut kept = vec![true; count as usize];
-                for _ in 0..count {
-                    rolls.push(roll_once(rng, &sides));
-                }
-                if let Some(modifiers) = modifier {
-                    for modifier in modifiers {
-                        match modifier {
-                            DiceModifier::Reroll => {
-                                for roll in &mut rolls {
-                                    while is_natural_minimum(*roll, &sides) {
-                                        *roll = roll_once(rng, &sides);
-                                    }
-                                }
-                            }
-                            DiceModifier::RerollOnce => {
-                                for roll in &mut rolls {
-                                    if is_natural_minimum(*roll, &sides) {
-                                        *roll = roll_once(rng, &sides);
-                                    }
-                                }
-                            }
-                            DiceModifier::Min(min) => {
-                                let min = clamp_i64_from_u64(*min);
-                                for roll in &mut rolls {
-                                    *roll = (*roll).max(min);
-                                }
-                            }
-                            DiceModifier::Max(max) => {
-                                let max = clamp_i64_from_u64(*max);
-                                for roll in &mut rolls {
-                                    *roll = (*roll).min(max);
-                                }
-                            }
-                            DiceModifier::KeepDrop(kd) => {
-                                kept = apply_keep_drop(Some(kd), &rolls);
-                            }
-                            DiceModifier::Exploding => {
-                                for roll in &mut rolls {
-                                    let mut last = *roll;
-                                    while is_natural_maximum(last, &sides) {
-                                        let extra = roll_once(rng, &sides);
-                                        *roll += extra;
-                                        last = extra;
-                                    }
-                                }
-                            }
-                            DiceModifier::CountMatching(comp) => {
-                                for (roll, k) in rolls.iter().zip(kept.iter_mut()) {
-                                    if *k && !comp.test(*roll) {
-                                        *k = false;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                let is_count_mode = modifier.as_ref().is_some_and(|mods| {
-                    matches!(mods.last(), Some(DiceModifier::CountMatching(_)))
-                });
-                let sum: i64 = if is_count_mode {
-                    kept.iter().filter(|&&k| k).count() as i64
-                } else {
-                    rolls
-                        .iter()
-                        .zip(kept.iter())
-                        .map(|(r, k)| if *k { *r } else { 0 })
-                        .sum()
-                };
-                (
-                    EvalTermKind::Dice {
-                        count,
-                        sides: sides.clone(),
-                        modifier: modifier.clone(),
-                        rolls,
-                        kept,
-                    },
-                    sign * sum,
-                )
-            }
+            } => evaluate_dice(sign, *count, sides, modifier, rng),
             Term::Const(n) => (EvalTermKind::Const { value: *n }, sign * *n as i64),
             Term::Group {
                 terms: inner_terms,
@@ -240,6 +158,94 @@ pub fn evaluate(terms: &[(i64, Term)], rng: &mut impl Rng) -> EvalResult {
         total,
         terms: out_terms,
     }
+}
+
+fn evaluate_dice(
+    sign: i64,
+    count: u64,
+    sides: &DiceSides,
+    modifier: &Option<Vec<DiceModifier>>,
+    rng: &mut impl Rng,
+) -> (EvalTermKind, i64) {
+    let mut rolls: Vec<i64> = Vec::with_capacity(count as usize);
+    let mut kept = vec![true; count as usize];
+    for _ in 0..count {
+        rolls.push(roll_once(rng, sides));
+    }
+    if let Some(modifiers) = modifier {
+        for modifier in modifiers {
+            match modifier {
+                DiceModifier::Reroll => {
+                    for roll in &mut rolls {
+                        while is_natural_minimum(*roll, sides) {
+                            *roll = roll_once(rng, sides);
+                        }
+                    }
+                }
+                DiceModifier::RerollOnce => {
+                    for roll in &mut rolls {
+                        if is_natural_minimum(*roll, sides) {
+                            *roll = roll_once(rng, sides);
+                        }
+                    }
+                }
+                DiceModifier::Min(min) => {
+                    let min = clamp_i64_from_u64(*min);
+                    for roll in &mut rolls {
+                        *roll = (*roll).max(min);
+                    }
+                }
+                DiceModifier::Max(max) => {
+                    let max = clamp_i64_from_u64(*max);
+                    for roll in &mut rolls {
+                        *roll = (*roll).min(max);
+                    }
+                }
+                DiceModifier::KeepDrop(kd) => {
+                    kept = apply_keep_drop(Some(kd), &rolls);
+                }
+                DiceModifier::Exploding => {
+                    for roll in &mut rolls {
+                        let mut last = *roll;
+                        while is_natural_maximum(last, sides) {
+                            let extra = roll_once(rng, sides);
+                            *roll += extra;
+                            last = extra;
+                        }
+                    }
+                }
+                DiceModifier::CountMatching(comp) => {
+                    for (roll, k) in rolls.iter().zip(kept.iter_mut()) {
+                        if *k && !comp.test(*roll) {
+                            *k = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let is_count_mode = modifier
+        .as_ref()
+        .is_some_and(|mods| matches!(mods.last(), Some(DiceModifier::CountMatching(_))));
+    let sum: i64 = if is_count_mode {
+        kept.iter().filter(|&&k| k).count() as i64
+    } else {
+        rolls
+            .iter()
+            .zip(kept.iter())
+            .map(|(r, k)| if *k { *r } else { 0 })
+            .sum()
+    };
+    (
+        EvalTermKind::Dice {
+            count,
+            sides: sides.clone(),
+            modifier: modifier.clone(),
+            rolls,
+            kept,
+        },
+        sign * sum,
+    )
 }
 
 #[cfg(test)]
