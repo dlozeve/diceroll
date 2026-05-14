@@ -2,6 +2,7 @@
 name = "diceroll_cli"
 version = "0.2.0"
 authors = ["Dimitri Lozeve"]
+homepage = "https://diceroll.run/"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 

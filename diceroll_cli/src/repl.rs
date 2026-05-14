@@ -40,6 +40,24 @@ pub fn repl(rng: &mut impl Rng, json: bool, color: bool) -> rustyline::Result<()
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
 
+    let name = env!("CARGO_BIN_NAME");
+    let version = env!("CARGO_PKG_VERSION");
+    let homepage = env!("CARGO_PKG_HOMEPAGE");
+    println!(
+        "
+⠀⠀⠀⠀⠀⢀⣠⡴⣶⣄⡀⠀⠀⠀⠀⠀⠀
+⠀⠀⢀⣤⠶⠛⠁⠀⡇⠈⠙⠷⣤⣀⠀⠀⠀
+⣴⠞⠫⠥⠄⠐⠒⠲⢓⠒⠂⠠⠤⠽⠳⢦⡀
+⣿⠆⠀⠀⠀⠀⡰⠁⠀⢢⠀⠀⠀⠀⢠⢻⡇
+⣿⠈⡄⠀⠀⡐⠱⢲⡔⡆⠣⠀⠀⢀⠆⢸⡇    {name} {version}
+⣿⠀⠰⡀⡜⠀⠰⠥⠣⠇⠀⠱⡀⡌⠀⢸⡇    {homepage}
+⣿⢀⠠⠻⡒⠒⠒⠒⠒⠒⠒⢒⠟⠤⡀⢸⡇
+⠻⢧⣄⠀⠈⢄⠀⠀⠀⠀⡠⠊⠀⣀⣴⠟⠁
+⠀⠀⠉⠛⢶⣄⡡⡀⠀⢔⣡⡴⠟⠉⠀⠀⠀
+⠀⠀⠀⠀⠀⠈⠙⠿⠾⠛⠁⠀⠀⠀⠀⠀⠀
+"
+    );
+
     loop {
         match rl.readline(">>> ") {
             Ok(line) => {

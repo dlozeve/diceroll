@@ -127,6 +127,10 @@ where
 
     while let Some(arg) = parser.next()? {
         match arg {
+            Short('V') | Long("version") => {
+                print_version();
+                process::exit(0);
+            }
             Long("seed") => seed = Some(parser.value()?.parse()?),
             Long("json") => json = true,
             Long("no-color") => no_color = true,
@@ -209,6 +213,7 @@ Options:
   --port N      port for `serve` (default: 8000)
   --samples N   number of samples on which to compute statistics (default: 1000)
   -h, --help    show this help
+  -V, --version print version
 
 Without EXPR, runs an interactive REPL (or reads stdin line-by-line if piped).
 
@@ -220,6 +225,12 @@ For an expression starting with '-', use '--' (e.g. diceroll -- -1d4+10).";
 
 fn print_help() {
     println!("{HELP}");
+}
+
+fn print_version() {
+    let name = env!("CARGO_BIN_NAME");
+    let version = env!("CARGO_PKG_VERSION");
+    println!("{name} {version}");
 }
 
 #[cfg(test)]
