@@ -11,6 +11,24 @@ let sessionSeed = null;
 const submittedHistory = [];
 let historyIndex = 0;
 
+function updateViewportInsets() {
+  const viewport = window.visualViewport;
+  const keyboardInset = viewport
+    ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+    : 0;
+  document.documentElement.style.setProperty(
+    "--keyboard-inset",
+    `${keyboardInset}px`,
+  );
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", updateViewportInsets);
+  window.visualViewport.addEventListener("scroll", updateViewportInsets);
+}
+window.addEventListener("resize", updateViewportInsets);
+updateViewportInsets();
+
 function appendLine({ classes = [], echo = false } = {}) {
   const div = document.createElement("div");
   div.classList.add("line", ...classes);
