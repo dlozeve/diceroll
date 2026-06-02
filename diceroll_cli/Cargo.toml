@@ -1,6 +1,6 @@
 [package]
 name = "diceroll_cli"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Dimitri Lozeve"]
 homepage = "https://diceroll.run/"
 license = "MIT OR Apache-2.0"
