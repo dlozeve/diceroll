@@ -14,6 +14,7 @@ import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.ComponentActivity
 import androidx.webkit.WebViewAssetLoader
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
 
@@ -43,19 +44,19 @@ class MainActivity : ComponentActivity() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest,
-            ): Boolean = handleUrl(view, request.url)
+            ): Boolean = handleUrl(request.url)
 
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 url: String,
-            ): Boolean = handleUrl(view, Uri.parse(url))
+            ): Boolean = handleUrl(url.toUri())
 
             override fun shouldInterceptRequest(
                 webView: WebView,
                 request: WebResourceRequest,
             ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
 
-            private fun handleUrl(view: WebView, uri: Uri): Boolean {
+            private fun handleUrl(uri: Uri): Boolean {
                 if (uri.host == "appassets.androidplatform.net") {
                     return false
                 }

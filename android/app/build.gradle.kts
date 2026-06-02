@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "run.diceroll"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "run.diceroll"
