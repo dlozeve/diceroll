@@ -160,6 +160,10 @@ python -m http.server 8000
 
 and open <http://localhost:8000>.
 
+On touch devices the page replaces the device keyboard with a built-in dice keypad holding just
+the digits, `d`, the operators, and the modifiers, on two panes. A `⌨` key switches back to the
+device keyboard. Desktop keeps a plain text field.
+
 ### On Android
 
 The same web app ships as an offline Android app, wrapped with

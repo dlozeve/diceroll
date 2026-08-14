@@ -281,75 +281,226 @@ infoBtn.addEventListener("click", () => {
   infoBtnLabel.textContent = open ? "Close" : "Help";
 });
 
+function recallPrevious() {
+  if (historyIndex > 0) {
+    historyIndex--;
+    input.value = submittedHistory[historyIndex];
+    requestAnimationFrame(() =>
+      input.setSelectionRange(input.value.length, input.value.length),
+    );
+  }
+}
+
+function recallNext() {
+  if (historyIndex < submittedHistory.length - 1) {
+    historyIndex++;
+    input.value = submittedHistory[historyIndex];
+  } else {
+    historyIndex = submittedHistory.length;
+    input.value = "";
+  }
+}
+
+function rollFromInput() {
+  void submit(input.value);
+  input.value = "";
+  input.focus();
+}
+
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
-    const value = input.value;
-    void submit(value);
-    input.value = "";
+    rollFromInput();
   } else if (e.key === "ArrowUp") {
-    if (historyIndex > 0) {
-      historyIndex--;
-      input.value = submittedHistory[historyIndex];
-      requestAnimationFrame(() =>
-        input.setSelectionRange(input.value.length, input.value.length),
-      );
-    }
+    recallPrevious();
     e.preventDefault();
   } else if (e.key === "ArrowDown") {
-    if (historyIndex < submittedHistory.length - 1) {
-      historyIndex++;
-      input.value = submittedHistory[historyIndex];
-    } else {
-      historyIndex = submittedHistory.length;
-      input.value = "";
-    }
+    recallNext();
     e.preventDefault();
   }
 });
 
-// Mobile: Roll button
-document.getElementById("roll-btn").addEventListener("click", () => {
-  void submit(input.value);
+const rollBtn = document.getElementById("roll-btn");
+rollBtn.addEventListener("click", rollFromInput);
+
+
+// Mobile: custom dice keypad. Touch devices get a keypad holding exactly the
+// tokens the dice notation uses, instead of the device keyboard; desktop keeps
+// the plain text field. Visibility is driven by CSS (see #keypad in the HTML),
+// the matching media query below only decides whether to suppress the device
+// keyboard with inputmode="none".
+const STATS_PREFIX = "stats ";
+
+const keypad = document.getElementById("keypad");
+const numbersPane = document.getElementById("keypad-numbers");
+const modifiersPane = document.getElementById("keypad-modifiers");
+const utilityRow = document.getElementById("keypad-utility");
+
+function insertText(text) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.setRangeText(text, start, end, "end");
+}
+
+function backspace() {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  // Delete the selection when there is one, otherwise the character before the caret
+  if (start === end && start === 0) return;
+  input.setRangeText("", start === end ? start - 1 : start, end, "end");
+}
+
+function toggleStatsPrefix() {
+  input.value = input.value.startsWith(STATS_PREFIX)
+    ? input.value.slice(STATS_PREFIX.length)
+    : STATS_PREFIX + input.value;
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function clearTranscript() {
   input.value = "";
-  input.focus();
-});
+  void submit("clear");
+}
 
+const insertKey = (text, label = text) => ({ label, insert: text });
+const backspaceKey = { label: "⌫", ariaLabel: "Backspace", action: backspace };
+const rollKey = {
+  label: "Roll",
+  ariaLabel: "Roll",
+  className: "key-roll",
+  action: rollFromInput,
+};
 
-// Mobile: quick dice bar
-const QUICK_DICE = [
-  { label: "d4",       expr: "d4" },
-  { label: "d6",       expr: "d6" },
-  { label: "d8",       expr: "d8" },
-  { label: "d10",      expr: "d10" },
-  { label: "d12",      expr: "d12" },
-  { label: "d20",      expr: "d20" },
-  { label: "d100",     expr: "d100" },
-  { label: "2d6",      expr: "2d6" },
-  { label: "4d6kh3",   expr: "4d6kh3" },
-  { label: "2d20kh1",  expr: "2d20kh1" },
-  { label: "2d20kl1",  expr: "2d20kl1" },
+const NUMBER_KEYS = [
+  insertKey("7"), insertKey("8"), insertKey("9"), insertKey("d"), backspaceKey,
+  insertKey("4"), insertKey("5"), insertKey("6"), insertKey("+"), insertKey("("),
+  insertKey("1"), insertKey("2"), insertKey("3"), insertKey("-", "−"), insertKey(")"),
+  insertKey("0"), insertKey("kh"), insertKey("kl"), insertKey("d%"), rollKey,
 ];
 
-const diceBar = document.getElementById("dice-bar");
-QUICK_DICE.forEach(({ label, expr }) => {
+const MODIFIER_KEYS = [
+  insertKey("kh"), insertKey("kl"), insertKey("dh"), insertKey("dl"), backspaceKey,
+  insertKey("min"), insertKey("max"), insertKey("r"), insertKey("ro"), insertKey("!"),
+  insertKey("c>"), insertKey("c>="), insertKey("c<"), insertKey("c<="), insertKey("*"),
+  insertKey("dF"), insertKey("d%"),
+  { label: "stats", ariaLabel: "Toggle the stats prefix", action: toggleStatsPrefix },
+  { label: "clear", ariaLabel: "Clear the transcript", action: clearTranscript },
+  rollKey,
+];
+
+function createKey({ label, insert, action, ariaLabel, className }) {
   const btn = document.createElement("button");
-  btn.className = "dice-btn";
+  btn.type = "button";
+  btn.className = "key";
+  if (className) btn.classList.add(...className.split(" "));
+  else if (label.length > 2) btn.classList.add("key-word");
   btn.textContent = label;
-  btn.setAttribute("aria-label", `Roll ${expr}`);
+  btn.setAttribute("aria-label", ariaLabel ?? `Insert ${insert}`);
   btn.disabled = true;
-  btn.addEventListener("click", () => {
-    submit(expr);
-  });
-  diceBar.appendChild(btn);
+  btn.addEventListener("click", insert === undefined ? action : () => insertText(insert));
+  return btn;
+}
+
+function renderPane(pane, keys) {
+  pane.replaceChildren(...keys.map(createKey));
+}
+
+renderPane(numbersPane, NUMBER_KEYS);
+renderPane(modifiersPane, MODIFIER_KEYS);
+
+let modifiersVisible = false;
+
+function togglePane() {
+  modifiersVisible = !modifiersVisible;
+  numbersPane.hidden = modifiersVisible;
+  modifiersPane.hidden = !modifiersVisible;
+  paneKey.textContent = modifiersVisible ? "123" : "mods";
+  paneKey.setAttribute("aria-pressed", String(modifiersVisible));
+  paneKey.setAttribute(
+    "aria-label",
+    modifiersVisible ? "Show the number keys" : "Show the modifier keys",
+  );
+  // Asking for a pane means asking for the keypad back
+  setNativeKeyboard(false);
+}
+
+// The device keyboard stays suppressed unless the user asks for it, for the
+// expressions the keypad cannot compose.
+const touchLayout = window.matchMedia("(hover: none) and (pointer: coarse)");
+let nativeKeyboard = false;
+
+function applyInputMode() {
+  if (touchLayout.matches && !nativeKeyboard) {
+    input.inputMode = "none";
+  } else {
+    input.removeAttribute("inputmode");
+  }
+}
+
+// While the device keyboard is up the keypad collapses to its utility row, so
+// the two keyboards never stack (see body.native-keyboard in the stylesheet).
+function setNativeKeyboard(on) {
+  if (nativeKeyboard === on) return;
+  nativeKeyboard = on;
+  applyInputMode();
+  document.body.classList.toggle("native-keyboard", on);
+  keyboardKey.setAttribute("aria-pressed", String(on));
+  // Re-focus so the device re-reads inputmode and shows or hides its keyboard
+  input.blur();
+  input.focus();
+}
+
+function toggleNativeKeyboard() {
+  setNativeKeyboard(!nativeKeyboard);
+}
+
+touchLayout.addEventListener("change", () => {
+  setNativeKeyboard(false);
+  applyInputMode();
 });
+applyInputMode();
+
+const paneKey = createKey({
+  label: "mods",
+  ariaLabel: "Show the modifier keys",
+  className: "key-util key-pane",
+  action: togglePane,
+});
+const keyboardKey = createKey({
+  label: "⌨",
+  ariaLabel: "Use the device keyboard",
+  className: "key-util key-keyboard",
+  action: toggleNativeKeyboard,
+});
+paneKey.setAttribute("aria-pressed", "false");
+keyboardKey.setAttribute("aria-pressed", "false");
+
+utilityRow.replaceChildren(
+  paneKey,
+  createKey({
+    label: "↑",
+    ariaLabel: "Previous expression",
+    className: "key-util",
+    action: recallPrevious,
+  }),
+  createKey({
+    label: "↓",
+    ariaLabel: "Next expression",
+    className: "key-util",
+    action: recallNext,
+  }),
+  keyboardKey,
+);
+
+// Tapping a key must not move focus away from the input, so the caret stays put
+keypad.addEventListener("mousedown", (e) => e.preventDefault());
 
 // Initialize WASM — input and buttons start disabled (see HTML)
 try {
   await init();
   await restoreSessionFromUrl();
   input.disabled = false;
-  document.getElementById("roll-btn").disabled = false;
-  diceBar.querySelectorAll(".dice-btn").forEach((btn) => (btn.disabled = false));
+  rollBtn.disabled = false;
+  keypad.querySelectorAll(".key").forEach((key) => (key.disabled = false));
   input.focus();
 } catch (e) {
   appendText("Failed to load the dice engine. Please reload the page.", "error");
