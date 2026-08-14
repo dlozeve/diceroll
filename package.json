@@ -1,0 +1,17 @@
+{
+  "name": "diceroll",
+  "version": "0.2.2",
+  "description": "Roll any dice combination, in the browser and on Android",
+  "license": "MIT OR Apache-2.0",
+  "private": true,
+  "scripts": {
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0"
+  }
+}

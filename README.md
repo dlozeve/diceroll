@@ -160,6 +160,12 @@ python -m http.server 8000
 
 and open <http://localhost:8000>.
 
+### On Android
+
+The same web app ships as an offline Android app, wrapped with
+[Capacitor](https://capacitorjs.com/). See [`android/README.md`](android/README.md)
+for the build instructions.
+
 ## License
 
 Licensed under either of

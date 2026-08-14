@@ -1,0 +1,13 @@
+{
+  "appId": "run.diceroll",
+  "appName": "diceroll",
+  "webDir": "diceroll_wasm/www",
+  "android": {
+    "backgroundColor": "#14171f"
+  },
+  "plugins": {
+    "SystemBars": {
+      "style": "DARK"
+    }
+  }
+}
