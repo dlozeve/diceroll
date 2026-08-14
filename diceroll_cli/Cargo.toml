@@ -1,10 +1,10 @@
 [package]
 name = "diceroll_cli"
-version = "0.2.2"
-authors = ["Dimitri Lozeve"]
+version.workspace = true
+authors.workspace = true
 homepage = "https://diceroll.run/"
-license = "MIT OR Apache-2.0"
-edition = "2024"
+license.workspace = true
+edition.workspace = true
 
 [[bin]]
 name = "diceroll"

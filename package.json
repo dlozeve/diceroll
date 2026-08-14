@@ -1,6 +1,5 @@
 {
   "name": "diceroll",
-  "version": "0.2.2",
   "description": "Roll any dice combination, in the browser and on Android",
   "license": "MIT OR Apache-2.0",
   "private": true,

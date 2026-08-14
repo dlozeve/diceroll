@@ -2,6 +2,14 @@
 members = ["diceroll", "diceroll_cli", "diceroll_wasm"]
 resolver = "3"
 
+# Single source of truth for the version. The crates inherit it, and
+# android/app/build.gradle reads it from here for versionName/versionCode.
+[workspace.package]
+version = "0.3.0"
+authors = ["Dimitri Lozeve"]
+license = "MIT OR Apache-2.0"
+edition = "2024"
+
 [workspace.lints.clippy]
 # Safety - treat as errors
 unwrap_used = "deny"

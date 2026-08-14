@@ -55,8 +55,10 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk
   with a plain coloured launch window instead of a splash image.
 - `app/src/main/res/values/colors.xml`, `drawable/ic_launcher_*`,
   `mipmap-*/ic_launcher*` — the app palette and launcher icon.
-- `app/build.gradle` — app id, version, and the debug signing config used for
-  release builds.
+- `app/build.gradle` — app id, the debug signing config used for release builds,
+  and the version: `versionName` is read from `[workspace.package]` in the root
+  [`Cargo.toml`](../Cargo.toml) and `versionCode` is derived from it
+  (`0.3.0` -> `300`), so a release means editing that one line and nothing else.
 
 Regenerating the project from scratch (`rm -rf android && npx cap add android`)
 resets all of the above to the Capacitor defaults.

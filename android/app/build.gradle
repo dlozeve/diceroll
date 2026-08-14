@@ -1,5 +1,17 @@
 apply plugin: 'com.android.application'
 
+// The version lives once, in [workspace.package] of the root Cargo.toml.
+// versionCode is derived from it (0.3.0 -> 300), so a release only ever means
+// editing that one line.
+def cargoToml = file("../../Cargo.toml").text
+def versionMatch = (cargoToml =~ /(?s)\[workspace\.package\].*?\nversion = "([^"]+)"/)
+if (!versionMatch) {
+    throw new GradleException("No [workspace.package] version found in the root Cargo.toml")
+}
+def appVersionName = versionMatch[0][1]
+def (major, minor, patch) = appVersionName.tokenize("-")[0].tokenize(".").collect { it.toInteger() }
+def appVersionCode = major * 10000 + minor * 100 + patch
+
 android {
     namespace = "run.diceroll"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +19,8 @@ android {
         applicationId "run.diceroll"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.2.2"
+        versionCode appVersionCode
+        versionName appVersionName
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
