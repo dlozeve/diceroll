@@ -86,6 +86,17 @@ impl Session {
         to_js(&result)
     }
 
+    /// Roll an expression using this session's RNG stream. Returns the whole
+    /// line (breakdown and total) as `{ text, style }` spans, so the caller
+    /// only has to turn each span into a node. `style` is one of `plain`,
+    /// `nat-1`, `nat-max` or `total`.
+    #[wasm_bindgen(js_name = rollSpans)]
+    pub fn roll_spans(&mut self, expr: &str) -> Result<JsValue, JsError> {
+        let result =
+            diceroll::run(expr, &mut self.rng).map_err(|e| JsError::new(&e.to_string()))?;
+        to_js(&result.line_spans())
+    }
+
     /// Compute statistics using this session's RNG stream.
     #[wasm_bindgen]
     pub fn stats(&mut self, expr: &str, samples: usize) -> Result<String, JsError> {

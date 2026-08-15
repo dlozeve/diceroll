@@ -7,27 +7,84 @@ const ANSI_RED: &str = "\x1b[31m";
 const ANSI_GREEN: &str = "\x1b[32m";
 const ANSI_RESET: &str = "\x1b[0m";
 
-fn format_roll(r: i64, sides: &DiceSides, color: bool) -> String {
-    match sides {
-        DiceSides::Numeric(n) if color && r == 1 => format!("{ANSI_RED}{r}{ANSI_RESET}"),
-        DiceSides::Numeric(n) if color && r == *n as i64 => {
-            format!("{ANSI_GREEN}{r}{ANSI_RESET}")
+/// How a [`Span`] is emphasised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpanStyle {
+    /// Ordinary text: notation, operators, brackets, kept/dropped markers.
+    Plain,
+    /// A natural 1 on a numeric die.
+    #[serde(rename = "nat-1")]
+    Nat1,
+    /// The highest face of a numeric die.
+    NatMax,
+    /// The grand total at the end of a line.
+    Total,
+}
+
+/// A run of output text carrying a single style.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Span {
+    pub text: String,
+    pub style: SpanStyle,
+}
+
+/// Accumulates spans, coalescing consecutive plain text so a line arrives as a
+/// handful of spans rather than one per token.
+#[derive(Debug, Default)]
+struct SpanBuilder {
+    spans: Vec<Span>,
+}
+
+impl SpanBuilder {
+    fn plain(&mut self, text: &str) {
+        match self.spans.last_mut() {
+            Some(last) if last.style == SpanStyle::Plain => last.text.push_str(text),
+            _ => self.spans.push(Span {
+                text: text.to_owned(),
+                style: SpanStyle::Plain,
+            }),
         }
-        _ => format!("{r}"),
+    }
+
+    fn styled(&mut self, text: &str, style: SpanStyle) {
+        if style == SpanStyle::Plain {
+            self.plain(text);
+        } else {
+            self.spans.push(Span {
+                text: text.to_owned(),
+                style,
+            });
+        }
     }
 }
 
-fn format_terms(terms: &[EvalTerm], color: bool) -> String {
-    let mut out = String::new();
+// Lets the traversal below build plain runs with `write!`.
+impl Write for SpanBuilder {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.plain(s);
+        Ok(())
+    }
+}
+
+fn roll_style(roll: i64, sides: &DiceSides) -> SpanStyle {
+    match sides {
+        // Fate dice have no natural 1 or critical, so they stay plain
+        DiceSides::Numeric(_) if roll == 1 => SpanStyle::Nat1,
+        DiceSides::Numeric(n) if roll == *n as i64 => SpanStyle::NatMax,
+        _ => SpanStyle::Plain,
+    }
+}
+
+fn push_terms(out: &mut SpanBuilder, terms: &[EvalTerm]) {
     for (idx, term) in terms.iter().enumerate() {
-        let op = if term.sign < 0 {
+        out.plain(if term.sign < 0 {
             " - "
         } else if idx == 0 {
             ""
         } else {
             " + "
-        };
-        out.push_str(op);
+        });
         match &term.kind {
             EvalTermKind::Dice {
                 count,
@@ -42,19 +99,20 @@ fn format_terms(terms: &[EvalTerm], color: bool) -> String {
                         let _ = write!(out, "{modifier}");
                     }
                 }
-                out.push('[');
+                out.plain("[");
                 for (i, (r, &k)) in rolls.iter().zip(kept.iter()).enumerate() {
                     if i > 0 {
-                        out.push(',');
+                        out.plain(",");
                     }
-                    let formatted = format_roll(*r, sides, color);
-                    if k {
-                        out.push_str(&formatted);
-                    } else {
-                        let _ = write!(out, "{{{formatted}}}");
+                    if !k {
+                        out.plain("{");
+                    }
+                    out.styled(&r.to_string(), roll_style(*r, sides));
+                    if !k {
+                        out.plain("}");
                     }
                 }
-                out.push(']');
+                out.plain("]");
             }
             EvalTermKind::Const { value: n } => {
                 let _ = write!(out, "{n}");
@@ -63,19 +121,79 @@ fn format_terms(terms: &[EvalTerm], color: bool) -> String {
                 terms: inner,
                 multiplier,
             } => {
-                out.push('(');
-                out.push_str(&format_terms(inner, color));
-                out.push(')');
+                out.plain("(");
+                push_terms(out, inner);
+                out.plain(")");
                 if *multiplier != 1 {
                     let _ = write!(out, " * {multiplier}");
                 }
             }
         }
     }
+}
+
+/// Renders spans back to a string. When `color` is true, natural 1s are red and
+/// max rolls are green (ANSI); every other style renders as bare text.
+pub fn render(spans: &[Span], color: bool) -> String {
+    let mut out = String::new();
+    for span in spans {
+        match span.style {
+            SpanStyle::Nat1 if color => {
+                let _ = write!(out, "{ANSI_RED}{}{ANSI_RESET}", span.text);
+            }
+            SpanStyle::NatMax if color => {
+                let _ = write!(out, "{ANSI_GREEN}{}{ANSI_RESET}", span.text);
+            }
+            _ => out.push_str(&span.text),
+        }
+    }
     out
 }
 
 impl EvalResult {
+    /// The breakdown as styled spans.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rand::SeedableRng;
+    /// use rand::rngs::StdRng;
+    /// use diceroll::SpanStyle;
+    ///
+    /// let mut rng = StdRng::seed_from_u64(0);
+    /// let spans = diceroll::run("3+4", &mut rng).unwrap().spans();
+    /// assert_eq!(spans.len(), 1);
+    /// assert_eq!(spans[0].text, "3 + 4");
+    /// assert_eq!(spans[0].style, SpanStyle::Plain);
+    /// ```
+    pub fn spans(&self) -> Vec<Span> {
+        let mut out = SpanBuilder::default();
+        push_terms(&mut out, &self.terms);
+        out.spans
+    }
+
+    /// The full line, `<breakdown> = <total>`, as styled spans.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rand::SeedableRng;
+    /// use rand::rngs::StdRng;
+    /// use diceroll::SpanStyle;
+    ///
+    /// let mut rng = StdRng::seed_from_u64(0);
+    /// let spans = diceroll::run("3+4", &mut rng).unwrap().line_spans();
+    /// let last = spans.last().unwrap();
+    /// assert_eq!((last.text.as_str(), last.style), ("7", SpanStyle::Total));
+    /// ```
+    pub fn line_spans(&self) -> Vec<Span> {
+        let mut out = SpanBuilder::default();
+        push_terms(&mut out, &self.terms);
+        out.plain(" = ");
+        out.styled(&self.total.to_string(), SpanStyle::Total);
+        out.spans
+    }
+
     /// Returns a human-readable breakdown: each term with its rolls, then the total.
     /// Dropped dice are shown in curly braces, e.g. `4d6dl1[5,4,3,{1}]`.
     /// When `color` is true, nat-1 rolls are red and nat-max rolls are green (ANSI).
@@ -91,7 +209,7 @@ impl EvalResult {
     /// assert_eq!(result.display(false), "3 + 4 - 1");
     /// ```
     pub fn display(&self, color: bool) -> String {
-        format_terms(&self.terms, color)
+        render(&self.spans(), color)
     }
 
     pub fn json(&self) -> String {
@@ -118,7 +236,7 @@ impl EvalResult {
         if json {
             self.json()
         } else {
-            format!("{} = {}", self.display(color), self.total)
+            render(&self.line_spans(), color)
         }
     }
 }
@@ -129,7 +247,99 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    use super::{Span, SpanStyle, render};
     use crate::eval::run;
+
+    fn styled(spans: &[Span], style: SpanStyle) -> Vec<&str> {
+        spans
+            .iter()
+            .filter(|s| s.style == style)
+            .map(|s| s.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn spans_coalesce_consecutive_plain_text() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let spans = run("3+4-1", &mut rng).unwrap().spans();
+        assert_eq!(spans.len(), 1, "got: {spans:?}");
+        assert_eq!(spans[0].text, "3 + 4 - 1");
+    }
+
+    #[test]
+    fn spans_mark_nat_1_and_nat_max() {
+        // Every face of a d2 is either the natural 1 or the max, so 20 rolls
+        // are all styled and both styles are certain to show up
+        let mut rng = StdRng::seed_from_u64(3);
+        let spans = run("20d2", &mut rng).unwrap().spans();
+        let marked = spans.iter().filter(|s| s.style != SpanStyle::Plain).count();
+        assert_eq!(marked, 20, "got: {spans:?}");
+        assert!(styled(&spans, SpanStyle::Nat1).iter().all(|t| *t == "1"));
+        assert!(styled(&spans, SpanStyle::NatMax).iter().all(|t| *t == "2"));
+        assert!(
+            !styled(&spans, SpanStyle::Nat1).is_empty(),
+            "got: {spans:?}"
+        );
+        assert!(
+            !styled(&spans, SpanStyle::NatMax).is_empty(),
+            "got: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn spans_leave_middling_rolls_plain() {
+        // Whatever the seed, only the extremes of a d6 may carry a style
+        let mut rng = StdRng::seed_from_u64(1);
+        let spans = run("30d6", &mut rng).unwrap().spans();
+        assert!(styled(&spans, SpanStyle::Nat1).iter().all(|t| *t == "1"));
+        assert!(styled(&spans, SpanStyle::NatMax).iter().all(|t| *t == "6"));
+    }
+
+    #[test]
+    fn spans_leave_fate_dice_plain() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let spans = run("4dF", &mut rng).unwrap().spans();
+        assert!(
+            spans.iter().all(|s| s.style == SpanStyle::Plain),
+            "got: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn spans_keep_dropped_dice_braces_plain() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let spans = run("4d6dl1", &mut rng).unwrap().spans();
+        let plain: String = spans
+            .iter()
+            .filter(|s| s.style == SpanStyle::Plain)
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(plain.contains('{') && plain.contains('}'), "got: {spans:?}");
+    }
+
+    #[test]
+    fn line_spans_end_with_the_total() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let r = run("3+4-1", &mut rng).unwrap();
+        let spans = r.line_spans();
+        assert_eq!(styled(&spans, SpanStyle::Total), [r.total.to_string()]);
+        assert_eq!(render(&spans, false), "3 + 4 - 1 = 6");
+    }
+
+    #[test]
+    fn rendering_spans_agrees_with_the_string_output() {
+        for expr in ["3+4-1", "4d6dl1", "3d2", "4dF", "(2d6+3)*2", "8d6c>3"] {
+            let mut rng = StdRng::seed_from_u64(11);
+            let r = run(expr, &mut rng).unwrap();
+            assert_eq!(render(&r.spans(), false), r.display(false), "{expr}");
+            assert_eq!(render(&r.spans(), true), r.display(true), "{expr}");
+            assert_eq!(
+                render(&r.line_spans(), false),
+                r.formatted(false, false),
+                "{expr}"
+            );
+        }
+    }
 
     #[test]
     fn display_constants() {

@@ -55,66 +55,29 @@ function appendText(text, ...classes) {
   div.textContent = text;
 }
 
-function appendRoll(result) {
+// The engine hands back the line already split into styled runs, so the
+// notation itself is defined once, in Rust. `style` doubles as the CSS class.
+const SPAN_ARIA_LABEL = {
+  "nat-1": (text) => `${text} (natural 1)`,
+  "nat-max": (text) => `${text} (critical)`,
+};
+
+function appendRoll(spans) {
   const div = appendLine();
-  renderTerms(div, result.terms);
-  const total = document.createElement("span");
-  total.className = "total";
-  total.textContent = ` = ${result.total}`;
-  div.appendChild(total);
-}
-
-function renderTerms(parent, terms) {
-  terms.forEach((term, idx) => {
-    parent.appendChild(document.createTextNode(termOperator(term, idx)));
-    if (term.kind === "dice") {
-      renderDice(parent, term);
-    } else if (term.kind === "const") {
-      parent.appendChild(document.createTextNode(String(term.value)));
-    } else if (term.kind === "group") {
-      parent.appendChild(document.createTextNode("("));
-      renderTerms(parent, term.terms);
-      parent.appendChild(document.createTextNode(")"));
-      if (term.multiplier !== 1) {
-        parent.appendChild(document.createTextNode(` * ${term.multiplier}`));
-      }
-    }
-  });
-}
-
-function termOperator(term, idx) {
-  if (term.sign < 0) return idx === 0 ? "-" : " - ";
-  return idx === 0 ? "" : " + ";
-}
-
-function renderDice(parent, term) {
-  let header = `${term.count}d${term.sides}`;
-  if (term.modifier != null) {
-    header += Array.isArray(term.modifier) ? term.modifier.join("") : term.modifier;
+  for (const { text, style } of spans) {
+    div.appendChild(spanNode(text, style));
   }
-  parent.appendChild(document.createTextNode(header + "["));
-  term.rolls.forEach((roll, i) => {
-    if (i > 0) parent.appendChild(document.createTextNode(","));
-    const kept = term.kept[i];
-    if (!kept) parent.appendChild(document.createTextNode("{"));
-    parent.appendChild(rollNode(roll, term.sides));
-    if (!kept) parent.appendChild(document.createTextNode("}"));
-  });
-  parent.appendChild(document.createTextNode("]"));
 }
 
-function rollNode(roll, sides) {
-  // sides is a number for numeric dice and "F" for Fate dice; only highlight numerics.
-  if (typeof sides === "number") {
-    if (roll === 1 || roll === sides) {
-      const span = document.createElement("span");
-      span.className = roll === 1 ? "nat-1" : "nat-max";
-      span.textContent = String(roll);
-      span.setAttribute("aria-label", roll === 1 ? `${roll} (natural 1)` : `${roll} (critical)`);
-      return span;
-    }
-  }
-  return document.createTextNode(String(roll));
+function spanNode(text, style) {
+  if (style === "plain") return document.createTextNode(text);
+
+  const span = document.createElement("span");
+  span.className = style;
+  span.textContent = text;
+  const ariaLabel = SPAN_ARIA_LABEL[style];
+  if (ariaLabel) span.setAttribute("aria-label", ariaLabel(text));
+  return span;
 }
 
 function generateSeed() {
@@ -222,7 +185,7 @@ function evaluate(line) {
     if (statsMatch) {
       appendText(session.stats(statsMatch[1], STATS_SAMPLES));
     } else {
-      appendRoll(session.rollJson(trimmed));
+      appendRoll(session.rollSpans(trimmed));
     }
   } catch (e) {
     appendText(e.message ?? String(e), "error");
