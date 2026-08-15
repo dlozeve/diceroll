@@ -1,8 +1,12 @@
 # diceroll
 
-Roll any dice combination from the command line!
+Roll any dice combination, from anywhere!
 
-## Features
+Try it online: https://diceroll.run
+
+Or download the Android app (`.apk`) or the command-line utility from the [releases](https://github.com/dlozeve/diceroll/releases).
+
+## CLI Features
 
 - Support an extensive dice notation
 - Interactive REPL
@@ -46,6 +50,14 @@ Modifiers:
 - Count matching dice: `8d6c>3` returns the number of dice that rolled above 3. Supports `>`, `>=`, `<`, `<=`.
 - Modifiers have a fixed order: per-die modifiers (`min`, `max`, `!`, `r`, `ro`) first, then keep/drop modifiers (`kh`, `kl`, `dh`, `dl`), then count matching (`c...`) last.
 - Modifiers can be chained when ordered correctly, e.g. `4d6rmin3kh4`
+
+## Installation
+
+As a web app, no install needed: [diceroll.run](https://diceroll.run)
+
+The Android application can be downloaded from the the [releases](https://github.com/dlozeve/diceroll/releases) page. It has the same functionality as the webapp.
+
+The CLI utility can also be downloaded from the [releases](https://github.com/dlozeve/diceroll/releases), for Linux and Mac.
 
 ## Usage
 
@@ -140,9 +152,17 @@ For all endpoints:
 - Encode arithmetic `+` as `%2B` in the query string, or use `curl --get --data-urlencode 'q=2d6+3'`
 - The default port is `8000` and can be configured with the `--port` argument
 
+## Building
+
+### CLI
+
+Install the Rust toolchain (e.g. with [rustup](https://rustup.rs/)),
+and run `cargo build --release`. The compiled binary is in
+`target/release/diceroll`.
+
 ### In the browser (WebAssembly)
 
-A WASM wrapper crate lives in [`diceroll_wasm/`](diceroll_wasm/) and powers a tiny static SPA in `diceroll_wasm/www/`.
+The WASM wrapper crate lives in [`diceroll_wasm/`](diceroll_wasm/) and powers a tiny static SPA in `diceroll_wasm/www/`.
 
 Build (requires [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)):
 
@@ -159,10 +179,6 @@ python -m http.server 8000
 ```
 
 and open <http://localhost:8000>.
-
-On touch devices the page replaces the device keyboard with a built-in dice keypad holding just
-the digits, `d`, the operators, and the modifiers, on two panes. A `⌨` key switches back to the
-device keyboard. Desktop keeps a plain text field.
 
 ### On Android
 
