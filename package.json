@@ -3,8 +3,10 @@
   "description": "Roll any dice combination, in the browser and on Android",
   "license": "MIT OR Apache-2.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "sync": "cap sync android"
+    "sync": "cap sync android",
+    "test": "node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

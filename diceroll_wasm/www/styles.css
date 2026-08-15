@@ -1,0 +1,426 @@
+@font-face {
+  font-family: "IM Fell DW Pica";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/webfonts/im-fell-dw-pica-latin-400-normal.woff2") format("woff2"),
+       url("/webfonts/im-fell-dw-pica-latin-400-normal.woff") format("woff");
+}
+@font-face {
+  font-family: "IM Fell DW Pica";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/webfonts/im-fell-dw-pica-latin-400-italic.woff2") format("woff2"),
+       url("/webfonts/im-fell-dw-pica-latin-400-italic.woff") format("woff");
+}
+
+:root {
+  --bg: #14171f;
+  --bg-elev: #1b1f2a;
+  --fg: #e8e3d3;
+  --muted: #8a93a6;
+  --rule: #2a2f3d;
+  --accent: #c9a96e;
+  --nat-max: #b8d989;
+  --nat-1: #c44d3a;
+  --keyboard-inset: 0px;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+body {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  color: var(--fg);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: max(env(safe-area-inset-bottom), var(--keyboard-inset));
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+header h1 {
+  margin: 0;
+  font-family: "IM Fell DW Pica", Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 1.85rem;
+  line-height: 1;
+  letter-spacing: 0;
+  color: var(--fg);
+}
+
+/* Enable OpenType features for the display typeface across all uses */
+header h1,
+#info-btn,
+#hint,
+#roll-btn {
+  font-variant-ligatures: common-ligatures;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+#header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+#github-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 0.3rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+#github-link:hover {
+  color: var(--fg);
+}
+
+#info-btn {
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  color: var(--muted);
+  font-family: "IM Fell DW Pica", Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    color 0.1s,
+    border-color 0.1s;
+}
+#info-btn:hover,
+#info-btn[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+#info-btn svg {
+  flex-shrink: 0;
+}
+
+#hint {
+  display: none;
+  color: var(--muted);
+  font-family: "IM Fell DW Pica", Georgia, "Times New Roman", serif;
+  font-size: 0.95rem;
+  padding: 0.65rem 1.25rem 0.75rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: 40dvh;
+}
+#hint.open {
+  display: block;
+}
+#hint code {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-style: normal;
+  font-size: 0.9em;
+}
+#hint p {
+  margin: 0 0 0.5rem;
+}
+#hint .hint-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.15rem 2rem;
+  margin-top: 0.4rem;
+}
+#hint .hint-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+#hint .hint-row code {
+  flex-shrink: 0;
+  min-width: 10ch;
+}
+#hint .hint-row span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+#terminal {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 1rem 1.25rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1.55;
+  overscroll-behavior: contain;
+}
+
+@keyframes nat-max-pulse {
+  0%   { transform: scale(1);    text-shadow: none; }
+  40%  { transform: scale(1.15); text-shadow: 0 0 8px var(--nat-max); }
+  100% { transform: scale(1);    text-shadow: none; }
+}
+@keyframes nat-1-shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-3px); }
+  40%      { transform: translateX(3px); }
+  60%      { transform: translateX(-3px); }
+  80%      { transform: translateX(2px); }
+}
+@keyframes total-pop {
+  0%   { transform: scale(0.85); color: var(--accent); }
+  60%  { transform: scale(1.08); }
+  100% { transform: scale(1);    color: inherit; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nat-max, .nat-1, .total { animation: none !important; }
+}
+
+.line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.line + .line {
+  margin-top: 0.15rem;
+}
+.echo {
+  margin-top: 0.5rem;
+}
+.echo:first-child {
+  margin-top: 0;
+}
+.prompt {
+  color: var(--accent);
+}
+.error {
+  color: var(--nat-1);
+}
+.total {
+  display: inline-block;
+  animation: total-pop 350ms cubic-bezier(0.25, 1, 0.5, 1) 80ms both;
+}
+.nat-max {
+  display: inline-block;
+  color: var(--nat-max);
+  animation: nat-max-pulse 600ms cubic-bezier(0.25, 1, 0.5, 1) 100ms both;
+}
+.nat-1 {
+  display: inline-block;
+  color: var(--nat-1);
+  animation: nat-1-shake 320ms cubic-bezier(0.25, 1, 0.5, 1) 100ms both;
+}
+
+/* Dice keypad: touch devices only, switched on at the end of this sheet */
+#keypad {
+  display: none;
+  flex-shrink: 0;
+  padding: 0.5rem 1rem;
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rule);
+  background: var(--bg-elev);
+}
+
+.keypad-pane,
+#keypad-utility {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+}
+/* Author `display: grid` outranks the UA rule for [hidden], so restate it */
+.keypad-pane[hidden] {
+  display: none;
+}
+#keypad-utility {
+  margin-top: 0.35rem;
+}
+.key-pane {
+  grid-column: span 2;
+}
+
+.key {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  padding: 0 0.3rem;
+  min-height: 44px;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+.key:active {
+  background: var(--rule);
+  border-color: var(--accent);
+}
+.key:disabled {
+  opacity: 0.4;
+}
+/* Words (min, max, stats, clear) need to fit the same key width as digits */
+.key-word {
+  font-size: 0.8rem;
+}
+.key-util {
+  color: var(--muted);
+}
+.key-keyboard {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.key-util[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.key-roll {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-family: "IM Fell DW Pica", Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 1.15rem;
+}
+.key-roll:active {
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+#input-row {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0.6rem 1.25rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rule);
+  background: var(--bg-elev);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  box-shadow: inset 2px 0 0 transparent;
+  transition: box-shadow 0.12s ease;
+  gap: 0.35rem;
+}
+#input-row:focus-within {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+#input-row .prompt {
+  padding-right: 0.25rem;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+#input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px; /* prevent iOS auto-zoom */
+  caret-color: var(--accent);
+  min-height: 44px;
+  padding: 0;
+  touch-action: manipulation;
+}
+
+#roll-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: var(--bg);
+  font-family: "IM Fell DW Pica", Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 1.15rem;
+  padding: 0 0.9rem;
+  height: 44px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+#roll-btn:active {
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  header h1 {
+    font-size: 1.55rem;
+  }
+  #terminal {
+    font-size: 13px;
+  }
+}
+
+/* Touch layout: the keypad takes over from the device keyboard. Kept last
+   so these win over the base rules they override. */
+@media (hover: none) and (pointer: coarse) {
+  #keypad {
+    display: block;
+  }
+  /* The keypad carries its own Roll key; the one in the input row would
+     only be a duplicate */
+  #roll-btn {
+    display: none;
+  }
+
+  /* Device-keyboard mode: collapse the keypad to its utility row so the
+     two keyboards never stack, and hand Roll back to the input row */
+  body.native-keyboard .keypad-pane {
+    display: none;
+  }
+  body.native-keyboard #keypad-utility {
+    margin-top: 0;
+  }
+  body.native-keyboard #roll-btn {
+    display: flex;
+  }
+}
